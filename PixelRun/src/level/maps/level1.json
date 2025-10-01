@@ -1,0 +1,38 @@
+{
+  "type": "map",
+  "version": "1.9",
+  "tiledversion": "1.9.2",
+  "orientation": "orthogonal",
+  "renderorder": "right-down",
+  "width": 50,
+  "height": 30,
+  "tilewidth": 16,
+  "tileheight": 16,
+  "infinite": false,
+  "tilesets": [],
+  "layers": [
+    {
+      "type": "objectgroup",
+      "name": "Objects",
+      "objects": [
+        { "id": 1, "name": "playerStart", "type": "spawn", "x": 64, "y": 400, "width": 16, "height": 16 },
+        { "id": 2, "name": "ground", "type": "ground", "x": 0, "y": 448, "width": 800, "height": 32 },
+
+        { "id": 3, "name": "platform", "type": "ground", "x": 200, "y": 360, "width": 120, "height": 16 },
+        { "id": 4, "name": "platform", "type": "ground", "x": 380, "y": 320, "width": 120, "height": 16 },
+        { "id": 5, "name": "platform", "type": "ground", "x": 560, "y": 280, "width": 120, "height": 16 },
+
+        { "id": 6, "name": "spikes", "type": "hazard", "x": 330, "y": 432, "width": 96, "height": 16 },
+
+        { "id": 7, "name": "coin", "type": "coin", "x": 240, "y": 320, "width": 12, "height": 12 },
+        { "id": 8, "name": "coin", "type": "coin", "x": 270, "y": 320, "width": 12, "height": 12 },
+        { "id": 9, "name": "coin", "type": "coin", "x": 400, "y": 280, "width": 12, "height": 12 },
+        { "id": 10, "name": "coin", "type": "coin", "x": 430, "y": 280, "width": 12, "height": 12 },
+        { "id": 11, "name": "coin", "type": "coin", "x": 580, "y": 240, "width": 12, "height": 12 },
+        { "id": 12, "name": "coin", "type": "coin", "x": 610, "y": 240, "width": 12, "height": 12 },
+
+        { "id": 13, "name": "goal", "type": "goal", "x": 740, "y": 416, "width": 32, "height": 32 }
+      ]
+    }
+  ]
+}

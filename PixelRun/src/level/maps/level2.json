@@ -1,0 +1,44 @@
+{
+  "type": "map",
+  "version": "1.9",
+  "tiledversion": "1.9.2",
+  "orientation": "orthogonal",
+  "renderorder": "right-down",
+  "width": 50,
+  "height": 30,
+  "tilewidth": 16,
+  "tileheight": 16,
+  "infinite": false,
+  "tilesets": [],
+  "layers": [
+    {
+      "type": "objectgroup",
+      "name": "Objects",
+      "objects": [
+        { "id": 1, "name": "playerStart", "type": "spawn", "x": 48, "y": 400, "width": 16, "height": 16 },
+
+        { "id": 2, "name": "groundA", "type": "ground", "x": 0, "y": 448, "width": 320, "height": 32 },
+        { "id": 3, "name": "gap", "type": "hazard", "x": 320, "y": 448, "width": 96, "height": 32 },
+        { "id": 4, "name": "groundB", "type": "ground", "x": 416, "y": 448, "width": 384, "height": 32 },
+
+        { "id": 5, "name": "platform", "type": "ground", "x": 180, "y": 360, "width": 96, "height": 16 },
+        { "id": 6, "name": "platform", "type": "ground", "x": 360, "y": 320, "width": 96, "height": 16 },
+        { "id": 7, "name": "platform", "type": "ground", "x": 540, "y": 280, "width": 96, "height": 16 },
+        { "id": 8, "name": "platform", "type": "ground", "x": 720, "y": 240, "width": 64, "height": 16 },
+
+        { "id": 9, "name": "spikes", "type": "hazard", "x": 300, "y": 432, "width": 20, "height": 16 },
+        { "id": 10, "name": "spikes", "type": "hazard", "x": 416, "y": 432, "width": 48, "height": 16 },
+        { "id": 11, "name": "spikes", "type": "hazard", "x": 720, "y": 224, "width": 64, "height": 16 },
+
+        { "id": 12, "name": "coin", "type": "coin", "x": 210, "y": 320, "width": 12, "height": 12 },
+        { "id": 13, "name": "coin", "type": "coin", "x": 390, "y": 280, "width": 12, "height": 12 },
+        { "id": 14, "name": "coin", "type": "coin", "x": 570, "y": 240, "width": 12, "height": 12 },
+        { "id": 15, "name": "coin", "type": "coin", "x": 740, "y": 200, "width": 12, "height": 12 },
+        { "id": 16, "name": "coin", "type": "coin", "x": 770, "y": 200, "width": 12, "height": 12 },
+        { "id": 17, "name": "coin", "type": "coin", "x": 570, "y": 200, "width": 12, "height": 12 },
+
+        { "id": 18, "name": "goal", "type": "goal", "x": 750, "y": 416, "width": 32, "height": 32 }
+      ]
+    }
+  ]
+}
