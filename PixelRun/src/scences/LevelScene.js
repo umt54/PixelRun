@@ -63,18 +63,30 @@ export default class LevelScene extends Phaser.Scene {
           this.physics.add.existing(ground, true);
           this.platforms.add(ground);
         } else if (type === 'hazard') {
-          // Use a row of spikes or a flat hazard body if wide
-          if (width <= 20) {
-            const spike = this.add.image(x + 8, y - 8, 'spike');
+          const centerX = x + width / 2;
+          const centerY = y - height / 2;
+
+          // Use either individual spike sprites or a flat hazard body for wider areas
+          if (width <= 32) {
+            const spike = this.add.image(centerX, centerY, 'spike');
             this.physics.add.existing(spike, true);
+
+            const bodyWidth = width || spike.width;
+            const bodyHeight = height || spike.height;
+            spike.body.setSize(bodyWidth, bodyHeight, true);
+
             this.hazards.add(spike);
           } else {
-            const rect = this.add.rectangle(x + width / 2, y - height / 2, width, height, 0xd64545, 0.25);
+            const rect = this.add.rectangle(centerX, centerY, width, height, 0xd64545, 0.25);
             this.physics.add.existing(rect, true);
             this.hazards.add(rect);
-            // decorate with spike tiles across width
-            for (let px = x; px < x + width; px += 16) {
-              this.add.image(px + 8, y - 8, 'spike');
+
+            // Decorate with spike tiles across the width for visual feedback
+            const tileCount = Math.max(1, Math.ceil(width / 16));
+            const tileSpacing = width / tileCount;
+            for (let i = 0; i < tileCount; i++) {
+              const tileX = x + (i + 0.5) * tileSpacing;
+              this.add.image(tileX, centerY, 'spike');
             }
           }
         } else if (type === 'coin') {
