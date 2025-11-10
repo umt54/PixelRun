@@ -4,7 +4,7 @@
   "tiledversion": "1.9.2",
   "orientation": "orthogonal",
   "renderorder": "right-down",
-  "width": 50,
+  "width": 150,
   "height": 30,
   "tilewidth": 16,
   "tileheight": 16,
@@ -16,7 +16,7 @@
       "name": "Objects",
       "objects": [
         { "id": 1, "name": "playerStart", "type": "spawn", "x": 64, "y": 400, "width": 16, "height": 16 },
-        { "id": 2, "name": "ground", "type": "ground", "x": 0, "y": 448, "width": 800, "height": 32 },
+        { "id": 2, "name": "ground", "type": "ground", "x": 0, "y": 448, "width": 2400, "height": 32 },
 
         { "id": 3, "name": "platform", "type": "ground", "x": 200, "y": 360, "width": 120, "height": 16 },
         { "id": 4, "name": "platform", "type": "ground", "x": 380, "y": 320, "width": 120, "height": 16 },
@@ -31,7 +31,27 @@
         { "id": 11, "name": "coin", "type": "coin", "x": 580, "y": 240, "width": 12, "height": 12 },
         { "id": 12, "name": "coin", "type": "coin", "x": 610, "y": 240, "width": 12, "height": 12 },
 
-        { "id": 13, "name": "goal", "type": "goal", "x": 740, "y": 416, "width": 32, "height": 32 }
+        { "id": 13, "name": "goal", "type": "goal", "x": 2320, "y": 416, "width": 32, "height": 32 },
+
+        { "id": 14, "name": "platform", "type": "ground", "x": 920, "y": 380, "width": 140, "height": 16 },
+        { "id": 15, "name": "platform", "type": "ground", "x": 1120, "y": 340, "width": 140, "height": 16 },
+        { "id": 16, "name": "platform", "type": "ground", "x": 1320, "y": 300, "width": 140, "height": 16 },
+        { "id": 17, "name": "platform", "type": "ground", "x": 1520, "y": 340, "width": 140, "height": 16 },
+        { "id": 18, "name": "platform", "type": "ground", "x": 1720, "y": 380, "width": 140, "height": 16 },
+
+        { "id": 19, "name": "spikes", "type": "hazard", "x": 1080, "y": 432, "width": 96, "height": 16 },
+        { "id": 20, "name": "spikes", "type": "hazard", "x": 1680, "y": 432, "width": 96, "height": 16 },
+
+        { "id": 21, "name": "coin", "type": "coin", "x": 960, "y": 340, "width": 12, "height": 12 },
+        { "id": 22, "name": "coin", "type": "coin", "x": 990, "y": 340, "width": 12, "height": 12 },
+        { "id": 23, "name": "coin", "type": "coin", "x": 1160, "y": 300, "width": 12, "height": 12 },
+        { "id": 24, "name": "coin", "type": "coin", "x": 1190, "y": 300, "width": 12, "height": 12 },
+        { "id": 25, "name": "coin", "type": "coin", "x": 1360, "y": 260, "width": 12, "height": 12 },
+        { "id": 26, "name": "coin", "type": "coin", "x": 1390, "y": 260, "width": 12, "height": 12 },
+        { "id": 27, "name": "coin", "type": "coin", "x": 1560, "y": 300, "width": 12, "height": 12 },
+        { "id": 28, "name": "coin", "type": "coin", "x": 1590, "y": 300, "width": 12, "height": 12 },
+        { "id": 29, "name": "coin", "type": "coin", "x": 1760, "y": 340, "width": 12, "height": 12 },
+        { "id": 30, "name": "coin", "type": "coin", "x": 1790, "y": 340, "width": 12, "height": 12 }
       ]
     }
   ]

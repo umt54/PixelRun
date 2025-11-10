@@ -4,7 +4,7 @@
   "tiledversion": "1.9.2",
   "orientation": "orthogonal",
   "renderorder": "right-down",
-  "width": 50,
+  "width": 150,
   "height": 30,
   "tilewidth": 16,
   "tileheight": 16,
@@ -20,6 +20,7 @@
         { "id": 2, "name": "groundLeft", "type": "ground", "x": 0, "y": 448, "width": 256, "height": 32 },
         { "id": 3, "name": "groundMid", "type": "ground", "x": 352, "y": 448, "width": 128, "height": 32 },
         { "id": 4, "name": "groundRight", "type": "ground", "x": 544, "y": 448, "width": 256, "height": 32 },
+        { "id": 20, "name": "groundFar", "type": "ground", "x": 800, "y": 448, "width": 1600, "height": 32 },
 
         { "id": 5, "name": "platform1", "type": "ground", "x": 210, "y": 360, "width": 90, "height": 16 },
         { "id": 6, "name": "platform2", "type": "ground", "x": 310, "y": 312, "width": 90, "height": 16 },
@@ -38,7 +39,27 @@
         { "id": 17, "name": "coin", "type": "coin", "x": 640, "y": 128, "width": 12, "height": 12 },
         { "id": 18, "name": "coin", "type": "coin", "x": 680, "y": 128, "width": 12, "height": 12 },
 
-        { "id": 19, "name": "goal", "type": "goal", "x": 744, "y": 416, "width": 32, "height": 32 }
+        { "id": 19, "name": "goal", "type": "goal", "x": 2320, "y": 416, "width": 32, "height": 32 },
+
+        { "id": 21, "name": "platform6", "type": "ground", "x": 920, "y": 380, "width": 120, "height": 16 },
+        { "id": 22, "name": "platform7", "type": "ground", "x": 1100, "y": 332, "width": 120, "height": 16 },
+        { "id": 23, "name": "platform8", "type": "ground", "x": 1280, "y": 284, "width": 120, "height": 16 },
+        { "id": 24, "name": "platform9", "type": "ground", "x": 1460, "y": 236, "width": 120, "height": 16 },
+        { "id": 25, "name": "platform10", "type": "ground", "x": 1640, "y": 188, "width": 120, "height": 16 },
+
+        { "id": 26, "name": "spikesD", "type": "hazard", "x": 880, "y": 432, "width": 96, "height": 16 },
+        { "id": 27, "name": "spikesE", "type": "hazard", "x": 1200, "y": 432, "width": 96, "height": 16 },
+
+        { "id": 28, "name": "coin", "type": "coin", "x": 950, "y": 340, "width": 12, "height": 12 },
+        { "id": 29, "name": "coin", "type": "coin", "x": 980, "y": 340, "width": 12, "height": 12 },
+        { "id": 30, "name": "coin", "type": "coin", "x": 1130, "y": 292, "width": 12, "height": 12 },
+        { "id": 31, "name": "coin", "type": "coin", "x": 1160, "y": 292, "width": 12, "height": 12 },
+        { "id": 32, "name": "coin", "type": "coin", "x": 1310, "y": 244, "width": 12, "height": 12 },
+        { "id": 33, "name": "coin", "type": "coin", "x": 1340, "y": 244, "width": 12, "height": 12 },
+        { "id": 34, "name": "coin", "type": "coin", "x": 1490, "y": 196, "width": 12, "height": 12 },
+        { "id": 35, "name": "coin", "type": "coin", "x": 1520, "y": 196, "width": 12, "height": 12 },
+        { "id": 36, "name": "coin", "type": "coin", "x": 1670, "y": 148, "width": 12, "height": 12 },
+        { "id": 37, "name": "coin", "type": "coin", "x": 1700, "y": 148, "width": 12, "height": 12 }
       ]
     }
   ]
