@@ -20,7 +20,7 @@ export default class MainMenuScene extends Phaser.Scene {
     const info = [
       `Enter/Click: Auswahl`,
       `Tasten: Pfeile/WASD zum Bewegen, Space zum Springen`,
-      `M: Mute/Unmute, ${CONTROLS.PAUSE_TOGGLE_KEY}: Pause`
+      `M: Mute/Unmute`
     ];
     this.add.text(400, 150, info.join('\n'), { fontSize: 14, color: '#A0A8BD', align: 'center' }).setOrigin(0.5);
 

@@ -51,11 +51,39 @@ export default class LevelScene extends Phaser.Scene {
       const { width: worldWidth, height: worldHeight } = this.computeWorldBounds(objects);
       this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
 
+      // Parallax background covering the viewport; repeats horizontally
+      const cam = this.cameras.main;
+      const bgHeight = cam.height;
+      const bgWidth = Math.max(worldWidth, cam.width);
+      this.bg = this.add.tileSprite(0, 0, bgWidth, bgHeight, 'level_bg')
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(-1000);
+      const bgSrc = this.textures.get('level_bg')?.getSourceImage?.();
+      if (bgSrc && bgSrc.height) {
+        const tScale = bgHeight / bgSrc.height;
+        this.bg.setTileScale(tScale, tScale);
+      }
+
     // Groups
     this.platforms = this.physics.add.staticGroup();
     this.hazards = this.physics.add.staticGroup();
     this.coins = this.physics.add.staticGroup();
     this.goals = this.physics.add.staticGroup();
+
+      // Determine base stage ground (lowest ground rect) and add visible stage image
+      this.stageRect = objects
+        .filter(o => o.type === 'ground')
+        .reduce((best, o) => (!best || o.y > best.y ? o : best), null);
+      const stageTop = this.stageRect ? Math.round(this.stageRect.y - (this.stageRect.height || 0)) : worldHeight - 64;
+      const stageTex = this.textures.get('stage')?.getSourceImage?.();
+      if (stageTex) {
+        // Align the TOP edge of stage.png to the physical stage top
+        this.stageImage = this.add.image(0, stageTop, 'stage').setOrigin(0, 0).setDepth(-200);
+        const sScale = worldWidth / stageTex.width;
+        this.stageImage.setScale(sScale);
+        this.stageImage.setScrollFactor(1, 1);
+      }
 
       // Player spawn
       const spawn = objects.find(o => o.type === 'spawn') || { x: 64, y: 400 };
@@ -69,6 +97,9 @@ export default class LevelScene extends Phaser.Scene {
           const ground = this.physics.add.staticImage(centerX, centerY, 'ground');
           ground.displayWidth = width;
           ground.displayHeight = height;
+          // Hide only the base floor so the background's ground is visible
+          const isBaseFloor = y >= (worldHeight - 40);
+          if (isBaseFloor) ground.setVisible(false);
           if (ground.refreshBody) ground.refreshBody();
           this.platforms.add(ground);
         } else if (type === 'hazard') {
@@ -99,6 +130,7 @@ export default class LevelScene extends Phaser.Scene {
             // Hitbox: exakt 16x16 über der Oberkante (deckungsgleich zur Grafik)
             const hitbox = this.add.rectangle(tileCenterX, groundTop - 8, 16, 16, 0xd64545, 0.18);
             this.physics.add.existing(hitbox, true);
+            hitbox._sprite = spike;
             this.hazards.add(hitbox);
           }
         } else if (type === 'coin') {
@@ -111,6 +143,22 @@ export default class LevelScene extends Phaser.Scene {
           this.goals.add(flag);
         }
       });
+
+      // After building objects, refine spike and coin placement for the new stage logic
+      this.refineSpikePlacement(objects);
+      this.refineCoinPlacement();
+
+      // Replace any legacy platform bodies with a single continuous stage collider
+      if (this.stageRect && this.platforms?.getChildren) {
+        const children = [...this.platforms.getChildren()];
+        children.forEach(c => c.destroy && c.destroy());
+        const stageTopEdge = Math.round(this.stageRect.y - (this.stageRect.height || 0));
+        const stageThickness = Math.max(16, Math.round(this.stageRect.height || 16));
+        const stageCenterY = stageTopEdge + stageThickness / 2;
+        const rect = this.add.rectangle((worldWidth) / 2, stageCenterY, worldWidth, stageThickness, 0x00ff00, 0);
+        this.physics.add.existing(rect, true);
+        this.platforms.add(rect);
+      }
 
       // Ensure static physics bodies match their game object sizes/positions
       // This prevents falling through floors and corrects hazard hitboxes
@@ -144,8 +192,8 @@ export default class LevelScene extends Phaser.Scene {
       this.player.setOffset(unscaledOffX, unscaledOffY);
       if (this.player.body?.updateFromGameObject) this.player.body.updateFromGameObject();
 
-      // Snap the player precisely onto the nearest ground (no drop)
-      const supportTop = this.findGroundSupportTop(objects, spawn.x, this.player.body.width);
+      // Snap the player precisely onto the stage top (no drop)
+      const supportTop = this.stageRect ? Math.round(this.stageRect.y - (this.stageRect.height || 0)) : this.findGroundSupportTop(objects, spawn.x, this.player.body.width);
       if (supportTop != null) {
         // Place so the bottom of the physics body sits on the ground
         const desiredTop = Math.round(supportTop - this.player.body.height - 1);
@@ -202,15 +250,18 @@ export default class LevelScene extends Phaser.Scene {
         this.score += UI.SCORE_PER_COIN;
         this.game.events.emit('score:add', UI.SCORE_PER_COIN, this.score);
         playBeep(this, 1046, 80, 'square');
+        // Level ends when all coins are collected
+        const remaining = (this.coins.getChildren() || []).filter(c => c.active).length;
+        if (remaining === 0) {
+          this.onLevelComplete();
+        }
       });
 
       this.physics.add.overlap(this.player, this.hazards, () => {
         this.onPlayerDeath();
       });
 
-      this.physics.add.overlap(this.player, this.goals, () => {
-        this.onLevelComplete();
-      });
+      // goal objects no longer used; completion via coins only
 
       // Now that colliders are set and spawn is adjusted, enable gravity
       if (this.player.body?.setAllowGravity) this.player.body.setAllowGravity(true);
@@ -222,11 +273,9 @@ export default class LevelScene extends Phaser.Scene {
         A: 'A',
         D: 'D',
         SPACE: 'SPACE',
-        M: CONTROLS.MUTE_TOGGLE_KEY,
-        P: CONTROLS.PAUSE_TOGGLE_KEY
+        M: CONTROLS.MUTE_TOGGLE_KEY
       });
 
-      this.input.keyboard.on(`keydown-${CONTROLS.PAUSE_TOGGLE_KEY}`, () => this.togglePause(), this);
 
     // Camera
       this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
@@ -234,14 +283,10 @@ export default class LevelScene extends Phaser.Scene {
       this.cameras.main.setDeadzone(120, 80);
 
     // HUD / UI
-      this.scene.run('UIScene', {
-        score: this.score,
-        timeLimit: this.levelMeta.timeLimit || DEFAULTS.TIME_LIMIT
-      });
+      this.scene.run('UIScene', { score: this.score });
 
     // Listen UI timer
-      this.game.events.on('timer:expired', this.onTimeExpired, this);
-      this.game.events.on('pause:toggle', this.togglePause, this);
+      // no timer/pause listeners
 
       playBeep(this, 700, 60, 'triangle');
     } catch (err) {
@@ -276,12 +321,7 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   shutdown() {
-    this.game.events.off('timer:expired', this.onTimeExpired, this);
-    this.game.events.off('pause:toggle', this.togglePause, this);
-  }
-
-  onTimeExpired() {
-    this.onPlayerDeath();
+    // no timer/pause cleanup needed anymore
   }
 
   onPlayerDeath() {
@@ -314,19 +354,7 @@ export default class LevelScene extends Phaser.Scene {
     }
   }
 
-  togglePause() {
-    if (this.scene.isPaused()) {
-      this.scene.resume();
-      this.physics.world.isPaused = false;
-      this.game.events.emit('pause:state', false);
-      playBeep(this, 760, 60, 'square');
-    } else {
-      this.scene.pause();
-      this.physics.world.isPaused = true;
-      this.game.events.emit('pause:state', true);
-      playBeep(this, 320, 60, 'square');
-    }
-  }
+  togglePause() {}
 
   respawnPlayer() {
     const p = this.spawnPoint || { x: 64, y: 400 };
@@ -351,6 +379,9 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    if (this.bg) {
+      this.bg.tilePositionX = this.cameras.main.scrollX * 0.3;
+    }
     if (!this.player || this.physics.world.isPaused) return;
 
     const left = this.cursors.left.isDown || this.keys.A.isDown;
@@ -457,6 +488,75 @@ export default class LevelScene extends Phaser.Scene {
       }
     }
     return best;
+  }
+
+  // Find the ground object (rect) spanning x with the highest surface (smallest top y)
+  findGroundObjAtX(objects, x) {
+    let bestObj = null;
+    let bestTop = Number.POSITIVE_INFINITY;
+    for (const obj of objects) {
+      if (obj.type !== 'ground') continue;
+      const left = obj.x;
+      const right = obj.x + (obj.width || 0);
+      if (x >= left && x <= right) {
+        const top = obj.y - (obj.height || 0);
+        if (top < bestTop) {
+          bestTop = top;
+          bestObj = obj;
+        }
+      }
+    }
+    return bestObj;
+  }
+
+  // Nudge/remove spikes so they sit fully on platforms, never on background, and not over edges
+  refineSpikePlacement(objects) {
+    if (!this.hazards?.getChildren) return;
+    const hazards = this.hazards.getChildren().slice().sort((a, b) => a.x - b.x);
+    const worldW = this.physics.world.bounds.width;
+    const stageTop = this.stageRect
+      ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
+      : Math.round(this.cameras.main.height - 64);
+    const stageLeft = 0;
+    const stageRight = worldW;
+    const seen = new Set();
+    const kept = [];
+    for (const h of hazards) {
+      // Clamp within stage and snap to 16px grid
+      const clampedX = Math.min(Math.max(Math.round(h.x), stageLeft + 8), stageRight - 8);
+      const idx = Math.round((clampedX - (stageLeft + 8)) / 16);
+      if (seen.has(idx)) {
+        // duplicate/overlap -> remove
+        if (h._sprite?.destroy) h._sprite.destroy();
+        if (h.destroy) h.destroy();
+        continue;
+      }
+      seen.add(idx);
+      kept.push(h);
+      // Place flush on stage top
+      if (h.setPosition) h.setPosition(stageLeft + 8 + idx * 16, stageTop - 8);
+      if (h.body?.updateFromGameObject) h.body.updateFromGameObject();
+      if (h._sprite?.setPosition) h._sprite.setPosition(stageLeft + 8 + idx * 16, stageTop).setOrigin(0.5, 1);
+    }
+  }
+
+  // Ensure coins are reachable and aligned to the stage (no floating coins)
+  refineCoinPlacement() {
+    if (!this.coins?.getChildren) return;
+    const worldW = this.physics.world.bounds.width;
+    const stageLeft = 0;
+    const stageRight = worldW;
+    const stageTop = this.stageRect
+      ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
+      : Math.round(this.cameras.main.height - 64);
+    const lift = 48; // coin height above stage surface (jump reach)
+    const coins = this.coins.getChildren();
+    for (const c of coins) {
+      const cx = Math.min(Math.max(Math.round(c.x), stageLeft + 8), stageRight - 8);
+      const cy = stageTop - lift;
+      if (c.setPosition) c.setPosition(cx, cy);
+      if (c.body?.updateFromGameObject) c.body.updateFromGameObject();
+    }
   }
 
   // Find a supporting ground top considering the player's width

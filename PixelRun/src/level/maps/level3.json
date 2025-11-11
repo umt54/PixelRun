@@ -49,6 +49,9 @@
 
         { "id": 26, "name": "spikesD", "type": "hazard", "x": 880, "y": 432, "width": 96, "height": 16 },
         { "id": 27, "name": "spikesE", "type": "hazard", "x": 1200, "y": 432, "width": 96, "height": 16 },
+        { "id": 38, "name": "spikesF", "type": "hazard", "x": 1520, "y": 432, "width": 96, "height": 16 },
+        { "id": 39, "name": "spikesG", "type": "hazard", "x": 1840, "y": 432, "width": 96, "height": 16 },
+        { "id": 40, "name": "spikesH", "type": "hazard", "x": 2080, "y": 432, "width": 96, "height": 16 },
 
         { "id": 28, "name": "coin", "type": "coin", "x": 950, "y": 340, "width": 12, "height": 12 },
         { "id": 29, "name": "coin", "type": "coin", "x": 980, "y": 340, "width": 12, "height": 12 },

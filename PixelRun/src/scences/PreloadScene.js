@@ -8,6 +8,12 @@ export default class PreloadScene extends Phaser.Scene {
 
   preload() {
     // Load external character assets and generate fallback textures for other items.
+    // Level background image
+    const bgUrl = new URL('../background/background.png', import.meta.url).href;
+    this.load.image('level_bg', bgUrl);
+    // Walkable stage image
+    const stageUrl = new URL('../elements/stage.png', import.meta.url).href;
+    this.load.image('stage', stageUrl);
     this.loadCharacterAssets();
     this.createGeneratedTextures();
   }
