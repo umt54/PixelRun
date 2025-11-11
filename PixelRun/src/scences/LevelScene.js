@@ -78,11 +78,11 @@ export default class LevelScene extends Phaser.Scene {
       const stageTop = this.stageRect ? Math.round(this.stageRect.y - (this.stageRect.height || 0)) : worldHeight - 64;
       const stageTex = this.textures.get('stage')?.getSourceImage?.();
       if (stageTex) {
-        // Align the TOP edge of stage.png to the physical stage top
-        this.stageImage = this.add.image(0, stageTop, 'stage').setOrigin(0, 0).setDepth(-200);
-        const sScale = worldWidth / stageTex.width;
-        this.stageImage.setScale(sScale);
-        this.stageImage.setScrollFactor(1, 1);
+        const stageHeight = stageTex.height || stageTex.source?.[0]?.height || 64;
+        this.stageImage = this.add.tileSprite(0, stageTop, worldWidth, stageHeight, 'stage')
+          .setOrigin(0, 0)
+          .setDepth(-200)
+          .setScrollFactor(1, 1);
       }
 
       // Player spawn
@@ -114,20 +114,20 @@ export default class LevelScene extends Phaser.Scene {
             const extraLeft = x + width - 16;
             if (tileLefts.length === 0 || extraLeft > tileLefts[tileLefts.length - 1]) tileLefts.push(extraLeft);
           }
-          // Falls Breite < 16 war, sorge für mindestens eine Kachel
+          // Falls Breite < 16 war, sorge f++r mindestens eine Kachel
           if (tileLefts.length === 0) tileLefts.push(x);
 
           for (const leftPos of tileLefts) {
             const tileCenterX = Math.round(leftPos + 8);
             const groundTopRaw = this.findGroundTopAtX(objects, tileCenterX);
-            if (groundTopRaw == null) continue; // keine Unterstützung -> keine Spike
+            if (groundTopRaw == null) continue; // keine Unterst++tzung -> keine Spike
             const groundTop = Math.round(groundTopRaw);
 
-            // Visual: Spike bündig auf der Plattformoberkante
+            // Visual: Spike b++ndig auf der Plattformoberkante
             const spike = this.add.image(tileCenterX, groundTop, 'spike');
             spike.setOrigin(0.5, 1);
 
-            // Hitbox: exakt 16x16 über der Oberkante (deckungsgleich zur Grafik)
+            // Hitbox: exakt 16x16 ++ber der Oberkante (deckungsgleich zur Grafik)
             const hitbox = this.add.rectangle(tileCenterX, groundTop - 8, 16, 16, 0xd64545, 0.18);
             this.physics.add.existing(hitbox, true);
             hitbox._sprite = spike;
@@ -292,7 +292,7 @@ export default class LevelScene extends Phaser.Scene {
     } catch (err) {
       // Show a friendly in-game error message instead of a blank screen
       console.error('Level load error:', err);
-      const msg = 'Fehler beim Laden des Levels. Drücke ESC für Menü.';
+      const msg = 'Fehler beim Laden des Levels. Dr++cke ESC f++r Men++.';
       this.add.text(400, 220, msg, { fontSize: 18, color: '#E7F0FF', align: 'center' }).setOrigin(0.5);
       this.add.text(400, 260, String(err?.message || err), { fontSize: 14, color: '#A0A8BD', align: 'center' }).setOrigin(0.5);
       this.input.keyboard.once('keydown-ESC', () => this.scene.start('MainMenuScene'));
@@ -571,3 +571,4 @@ export default class LevelScene extends Phaser.Scene {
     return Math.min(...candidates);
   }
 }
+

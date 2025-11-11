@@ -11,6 +11,9 @@ export default class PreloadScene extends Phaser.Scene {
     // Level background image
     const bgUrl = new URL('../background/background.png', import.meta.url).href;
     this.load.image('level_bg', bgUrl);
+    // Platform image for jumpable platforms
+    const platUrl = new URL('../elements/plattform.png', import.meta.url).href;
+    this.load.image('platform', platUrl);
     // Walkable stage image
     const stageUrl = new URL('../elements/stage.png', import.meta.url).href;
     this.load.image('stage', stageUrl);
