@@ -64,13 +64,10 @@ export default class LevelScene extends Phaser.Scene {
       const cam = this.cameras.main;
       this.cameras.main.setZoom(1).setRoundPixels(false);
       const canvas = this.game.canvas;
-      const cssWidth = canvas.style.width;
-      const cssHeight = canvas.style.height;
-      console.log('CANVAS CSS', canvas.width, canvas.height, cssWidth, cssHeight);
-      const targetWidth = `${canvas.width}px`;
-      const targetHeight = `${canvas.height}px`;
-      if (cssWidth !== targetWidth) canvas.style.width = targetWidth;
-      if (cssHeight !== targetHeight) canvas.style.height = targetHeight;
+      if (canvas?.style) {
+        canvas.style.width = `${canvas.width}px`;
+        canvas.style.height = `${canvas.height}px`;
+      }
       const bgHeight = cam.height;
       const bgWidth = Math.max(worldWidth, cam.width);
       this.bg = this.add.tileSprite(0, 0, bgWidth, bgHeight, 'level_bg')
@@ -84,7 +81,7 @@ export default class LevelScene extends Phaser.Scene {
       }
 
       this.initializeRenderLayers();
-      this.resetPlatformVisuals();
+      this.resetPlatformVisuals(true);
       this.logLayerDepths();
 
     // Groups
@@ -515,14 +512,23 @@ export default class LevelScene extends Phaser.Scene {
     });
   }
 
-  resetPlatformVisuals() {
+  resetPlatformVisuals(dropSurfaces = false) {
     if (this.platformLayer) {
-    this.platformLayer.removeAll(true);
-    this.platformLayer.clearMask?.();
-    this.platformLayer.setBlendMode?.(Phaser.BlendModes.NORMAL);
-    this.platformLayer.setAlpha?.(1);
+      this.platformLayer.removeAll(true);
+      this.platformLayer.clearMask?.();
+      this.platformLayer.setBlendMode?.(Phaser.BlendModes.NORMAL);
+      this.platformLayer.setAlpha?.(1);
     }
-    this.platformSurfaces = [];
+    if (dropSurfaces) {
+      this.platformSurfaces = [];
+      return;
+    }
+    this.platformSurfaces.forEach(surface => {
+      if (surface?.visuals?.length) {
+        surface.visuals.forEach(v => v?.destroy?.());
+      }
+      surface.visuals = [];
+    });
   }
 
 
@@ -551,21 +557,26 @@ export default class LevelScene extends Phaser.Scene {
     if (collider.body?.updateFromGameObject) collider.body.updateFromGameObject();
     this.platforms.add(collider);
 
+    const left = Math.round(x);
+    const topPx = Math.round(top);
+    const widthPx = Math.max(1, Math.round(width));
+    const heightPx = Math.max(1, Math.round(height));
+    const visuals = this.stampPlatformOnLine(left, topPx, widthPx, heightPx);
+
     const surfaceRecord = {
-      left: null,
-      right: null,
-      width,
-      height,
-      top: null,
+      left,
+      right: left + widthPx,
+      width: widthPx,
+      height: heightPx,
+      top: topPx,
       collider,
-      visuals: []
+      visuals
     };
     this.platformSurfaces.push(surfaceRecord);
   }
 
   buildVisiblePlatformsFromLines() {
-    const baseImg = this.textures.get('platform')?.getSourceImage?.();
-    if (!baseImg) {
+    if (!this.textures.exists('platform')) {
       console.error('platform texture missing');
       return;
     }
@@ -575,54 +586,58 @@ export default class LevelScene extends Phaser.Scene {
       const body = collider?.body;
       if (!body) return;
 
-      if (surface.visuals?.length) {
-        surface.visuals.forEach(v => v.destroy());
-      }
-
       const left = Math.round(body.left);
       const right = Math.round(body.right);
       const top = Math.round(body.top);
       const widthPx = Math.max(1, Math.round(right - left));
-      const visuals = this.stampPlatformOnLine(left, top, widthPx, baseImg);
 
       surface.left = left;
       surface.right = left + widthPx;
       surface.width = widthPx;
       surface.top = top;
-      surface.visuals = visuals;
+      if (!surface.visuals?.length) {
+        surface.visuals = this.stampPlatformOnLine(left, top, widthPx, surface.height);
+      } else {
+        this.positionPlatformVisuals(surface, left, top, widthPx, surface.height);
+      }
     });
   }
 
-  stampPlatformOnLine(left, top, widthPx, baseImg) {
-    const source = baseImg ?? this.textures.get('platform')?.getSourceImage?.();
+  stampPlatformOnLine(left, top, widthPx, heightPx = 16) {
+    const source = this.textures.get('platform')?.getSourceImage?.();
     if (!source) {
       console.error('platform texture missing');
       return [];
     }
-    const tileWidth = source.width || widthPx;
-    const sliceH = Math.min(14, source.height || 16);
-    const visuals = [];
     const lineLeft = Math.round(left);
     const lineTop = Math.round(top);
-    let remaining = Math.max(1, Math.round(widthPx));
-    let cursorX = lineLeft;
-    while (remaining > 0) {
-      const drawWidth = Math.min(tileWidth, remaining);
-      const sprite = this.add.image(cursorX, lineTop, 'platform')
-        .setOrigin(0, 1)
-        .setDepth(20)
-        .setScrollFactor(1)
-        .setScale(1)
-        .setAlpha(1)
-        .setVisible(true);
-      sprite.setCrop(0, 0, drawWidth, sliceH);
-      sprite.setDisplaySize(drawWidth, sliceH);
+    const width = Math.max(1, Math.round(widthPx));
+    const height = Math.max(1, Math.round(heightPx || source.height || 16));
+    const sprite = this.add.image(lineLeft, lineTop, 'platform')
+      .setOrigin(0, 1)
+      .setDepth(20)
+      .setScrollFactor(1)
+      .setVisible(true)
+      .setAlpha(1);
+    sprite.setDisplaySize(width, height);
+    this.platformLayer?.add?.(sprite);
+    return [sprite];
+  }
+
+  positionPlatformVisuals(surface, left, top, widthPx, heightPx = 16) {
+    const width = Math.max(1, Math.round(widthPx));
+    const height = Math.max(1, Math.round(heightPx));
+    const posX = Math.round(left);
+    const posY = Math.round(top);
+    (surface.visuals || []).forEach(sprite => {
+      if (!sprite) return;
+      sprite.setPosition(posX, posY);
+      sprite.setDisplaySize(width, height);
+      sprite.setDepth(20);
+      sprite.setScrollFactor(1);
+      sprite.setVisible(true);
       this.platformLayer?.add?.(sprite);
-      visuals.push(sprite);
-      cursorX += drawWidth;
-      remaining -= drawWidth;
-    }
-    return visuals;
+    });
   }
 
   spawnCoinsForPlatforms() {
