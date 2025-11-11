@@ -38,6 +38,11 @@ body {
   max-height: 100%;
 }
 
+canvas {
+  width: auto !important;
+  height: auto !important;
+}
+
 /* Basic clickable text buttons in menus */
 .button {
   cursor: pointer;

@@ -19,6 +19,11 @@ export default class LevelScene extends Phaser.Scene {
     this.jumpMode = null; // 'idle' | 'run'
     this.jumpFacing = 'east';
     this.spawnPoint = { x: 64, y: 400 };
+    this.platformSurfaces = [];
+    this.stageLayer = null;
+    this.platformLayer = null;
+    this.coinLayer = null;
+    this.playerLayer = null;
   }
 
   init(data) {
@@ -33,6 +38,10 @@ export default class LevelScene extends Phaser.Scene {
     this.levelMeta = meta;
     const url = new URL(`../level/maps/${meta.map}`, import.meta.url);
     this.load.tilemapTiledJSON(`level-${this.levelId}`, url.href);
+    if (!this.textures.exists('platform')) {
+      const platUrl = new URL('../elements/plattform.png', import.meta.url).href;
+      this.load.image('platform', platUrl);
+    }
   }
 
   create() {
@@ -53,6 +62,15 @@ export default class LevelScene extends Phaser.Scene {
 
       // Parallax background covering the viewport; repeats horizontally
       const cam = this.cameras.main;
+      this.cameras.main.setZoom(1).setRoundPixels(false);
+      const canvas = this.game.canvas;
+      const cssWidth = canvas.style.width;
+      const cssHeight = canvas.style.height;
+      console.log('CANVAS CSS', canvas.width, canvas.height, cssWidth, cssHeight);
+      const targetWidth = `${canvas.width}px`;
+      const targetHeight = `${canvas.height}px`;
+      if (cssWidth !== targetWidth) canvas.style.width = targetWidth;
+      if (cssHeight !== targetHeight) canvas.style.height = targetHeight;
       const bgHeight = cam.height;
       const bgWidth = Math.max(worldWidth, cam.width);
       this.bg = this.add.tileSprite(0, 0, bgWidth, bgHeight, 'level_bg')
@@ -64,6 +82,10 @@ export default class LevelScene extends Phaser.Scene {
         const tScale = bgHeight / bgSrc.height;
         this.bg.setTileScale(tScale, tScale);
       }
+
+      this.initializeRenderLayers();
+      this.resetPlatformVisuals();
+      this.logLayerDepths();
 
     // Groups
     this.platforms = this.physics.add.staticGroup();
@@ -79,10 +101,11 @@ export default class LevelScene extends Phaser.Scene {
       const stageTex = this.textures.get('stage')?.getSourceImage?.();
       if (stageTex) {
         const stageHeight = stageTex.height || stageTex.source?.[0]?.height || 64;
-        this.stageImage = this.add.tileSprite(0, stageTop, worldWidth, stageHeight, 'stage')
-          .setOrigin(0, 0)
-          .setDepth(-200)
-          .setScrollFactor(1, 1);
+      this.stageImage = this.add.tileSprite(0, stageTop, worldWidth, stageHeight, 'stage')
+        .setOrigin(0, 0)
+        .setDepth(0)
+        .setScrollFactor(1, 1);
+      this.stageLayer.add(this.stageImage);
       }
 
       // Player spawn
@@ -92,16 +115,11 @@ export default class LevelScene extends Phaser.Scene {
       objects.forEach(obj => {
         const { type, x, y, width = 16, height = 16 } = obj;
         if (type === 'ground') {
-          const centerX = x + width / 2;
-          const centerY = y - height / 2;
-          const ground = this.physics.add.staticImage(centerX, centerY, 'ground');
-          ground.displayWidth = width;
-          ground.displayHeight = height;
-          // Hide only the base floor so the background's ground is visible
-          const isBaseFloor = y >= (worldHeight - 40);
-          if (isBaseFloor) ground.setVisible(false);
-          if (ground.refreshBody) ground.refreshBody();
-          this.platforms.add(ground);
+          if (this.isFloatingPlatform({ height })) {
+            this.createPlatformSurface({ x, y, width, height });
+          } else {
+            this.createStageSegment({ x, y, width, height });
+          }
         } else if (type === 'hazard') {
           // Build spikes per 16px tile. Each tile snaps pixelgenau auf die Plattformoberkante.
           const wholeTiles = Math.floor(width / 16);
@@ -133,10 +151,6 @@ export default class LevelScene extends Phaser.Scene {
             hitbox._sprite = spike;
             this.hazards.add(hitbox);
           }
-        } else if (type === 'coin') {
-          const coin = this.add.image(x, y, 'coin');
-          this.physics.add.existing(coin, true);
-          this.coins.add(coin);
         } else if (type === 'goal') {
           const flag = this.add.image(x + 8, y - 10, 'flag');
           this.physics.add.existing(flag, true);
@@ -144,21 +158,10 @@ export default class LevelScene extends Phaser.Scene {
         }
       });
 
-      // After building objects, refine spike and coin placement for the new stage logic
+      this.time.delayedCall(0, () => this.buildVisiblePlatformsFromLines());
+      this.time.delayedCall(1, () => this.spawnCoinsForPlatforms());
+      // After building objects, refine spike placement for fairness/clarity
       this.refineSpikePlacement(objects);
-      this.refineCoinPlacement();
-
-      // Replace any legacy platform bodies with a single continuous stage collider
-      if (this.stageRect && this.platforms?.getChildren) {
-        const children = [...this.platforms.getChildren()];
-        children.forEach(c => c.destroy && c.destroy());
-        const stageTopEdge = Math.round(this.stageRect.y - (this.stageRect.height || 0));
-        const stageThickness = Math.max(16, Math.round(this.stageRect.height || 16));
-        const stageCenterY = stageTopEdge + stageThickness / 2;
-        const rect = this.add.rectangle((worldWidth) / 2, stageCenterY, worldWidth, stageThickness, 0x00ff00, 0);
-        this.physics.add.existing(rect, true);
-        this.platforms.add(rect);
-      }
 
       // Ensure static physics bodies match their game object sizes/positions
       // This prevents falling through floors and corrects hazard hitboxes
@@ -175,6 +178,8 @@ export default class LevelScene extends Phaser.Scene {
       this.player.setCollideWorldBounds(true);
       this.player.setMaxVelocity(PHYSICS.PLAYER.MAX_VEL_X, PHYSICS.PLAYER.MAX_VEL_Y);
       this.player.setDragX(PHYSICS.PLAYER.DRAG_X);
+      this.player.setDepth(50);
+      this.playerLayer?.add(this.player);
       // Refit physics body to match scaled sprite size
       const dispW = this.player.displayWidth;
       const dispH = this.player.displayHeight;
@@ -475,6 +480,182 @@ export default class LevelScene extends Phaser.Scene {
     return this.facing === 'west' ? 'char_rot_w' : 'char_rot_e';
   }
 
+  initializeRenderLayers() {
+    this.stageLayer?.destroy(true);
+    this.platformLayer?.destroy(true);
+    this.coinLayer?.destroy(true);
+    this.playerLayer?.destroy(true);
+    this.stageLayer = this.add.layer();
+    this.stageLayer.setDepth(0);
+    this.stageLayer.setScrollFactor?.(1);
+    this.platformLayer = this.add.layer();
+    this.platformLayer.setDepth(20);
+    this.platformLayer.setScrollFactor?.(1);
+    this.coinLayer = this.add.layer();
+    this.coinLayer.setDepth(40);
+    this.coinLayer.setScrollFactor?.(1);
+    this.playerLayer = this.add.layer();
+    this.playerLayer.setDepth(50);
+    this.playerLayer.setScrollFactor?.(1);
+    this.stageLayer?.parentContainer?.setScale?.(1, 1);
+    this.platformLayer?.parentContainer?.setScale?.(1, 1);
+    this.coinLayer?.parentContainer?.setScale?.(1, 1);
+    this.playerLayer?.parentContainer?.setScale?.(1, 1);
+    this.platformLayer?.clearMask?.();
+    this.platformLayer?.setBlendMode?.(Phaser.BlendModes.NORMAL);
+    this.platformLayer?.setAlpha?.(1);
+  }
+
+  logLayerDepths() {
+    console.log('LAYER DEPTHS', {
+      stage: this.stageLayer?.depth,
+      platform: this.platformLayer?.depth,
+      coin: this.coinLayer?.depth,
+      player: this.playerLayer?.depth
+    });
+  }
+
+  resetPlatformVisuals() {
+    if (this.platformLayer) {
+    this.platformLayer.removeAll(true);
+    this.platformLayer.clearMask?.();
+    this.platformLayer.setBlendMode?.(Phaser.BlendModes.NORMAL);
+    this.platformLayer.setAlpha?.(1);
+    }
+    this.platformSurfaces = [];
+  }
+
+
+  isFloatingPlatform({ height }) {
+    return (height || 0) > 0 && (height || 0) <= 20;
+  }
+
+  createStageSegment({ x, y, width = 32, height = 16 }) {
+    const centerX = x + width / 2;
+    const centerY = y - height / 2;
+    const chunk = this.physics.add.staticImage(centerX, centerY, 'ground');
+    chunk.displayWidth = width;
+    chunk.displayHeight = height;
+    chunk.setVisible(false);
+    if (chunk.refreshBody) chunk.refreshBody();
+    this.platforms.add(chunk);
+  }
+
+  createPlatformSurface({ x, y, width = 32, height = 16 }) {
+    const top = y - height;
+    const centerX = x + width / 2;
+    const centerY = top + height / 2;
+
+    const collider = this.add.rectangle(centerX, centerY, width, height, 0xffffff, 0);
+    this.physics.add.existing(collider, true);
+    if (collider.body?.updateFromGameObject) collider.body.updateFromGameObject();
+    this.platforms.add(collider);
+
+    const surfaceRecord = {
+      left: null,
+      right: null,
+      width,
+      height,
+      top: null,
+      collider,
+      visuals: []
+    };
+    this.platformSurfaces.push(surfaceRecord);
+  }
+
+  buildVisiblePlatformsFromLines() {
+    const baseImg = this.textures.get('platform')?.getSourceImage?.();
+    if (!baseImg) {
+      console.error('platform texture missing');
+      return;
+    }
+
+    this.platformSurfaces.forEach(surface => {
+      const { collider } = surface;
+      const body = collider?.body;
+      if (!body) return;
+
+      if (surface.visuals?.length) {
+        surface.visuals.forEach(v => v.destroy());
+      }
+
+      const left = Math.round(body.left);
+      const right = Math.round(body.right);
+      const top = Math.round(body.top);
+      const widthPx = Math.max(1, Math.round(right - left));
+      const visuals = this.stampPlatformOnLine(left, top, widthPx, baseImg);
+
+      surface.left = left;
+      surface.right = left + widthPx;
+      surface.width = widthPx;
+      surface.top = top;
+      surface.visuals = visuals;
+    });
+  }
+
+  stampPlatformOnLine(left, top, widthPx, baseImg) {
+    const source = baseImg ?? this.textures.get('platform')?.getSourceImage?.();
+    if (!source) {
+      console.error('platform texture missing');
+      return [];
+    }
+    const tileWidth = source.width || widthPx;
+    const sliceH = Math.min(14, source.height || 16);
+    const visuals = [];
+    const lineLeft = Math.round(left);
+    const lineTop = Math.round(top);
+    let remaining = Math.max(1, Math.round(widthPx));
+    let cursorX = lineLeft;
+    while (remaining > 0) {
+      const drawWidth = Math.min(tileWidth, remaining);
+      const sprite = this.add.image(cursorX, lineTop, 'platform')
+        .setOrigin(0, 1)
+        .setDepth(20)
+        .setScrollFactor(1)
+        .setScale(1)
+        .setAlpha(1)
+        .setVisible(true);
+      sprite.setCrop(0, 0, drawWidth, sliceH);
+      sprite.setDisplaySize(drawWidth, sliceH);
+      this.platformLayer?.add?.(sprite);
+      visuals.push(sprite);
+      cursorX += drawWidth;
+      remaining -= drawWidth;
+    }
+    return visuals;
+  }
+
+  spawnCoinsForPlatforms() {
+    if (!this.coins) return;
+    if (this.coins.clear) this.coins.clear(true, true);
+    this.coinLayer?.removeAll(true);
+
+    const coinTex = this.textures.get('coin')?.getSourceImage?.();
+    const baseCoinHeight = coinTex?.height || 16;
+
+    this.platformSurfaces.forEach(surface => {
+      const offsets = this.coinOffsetsForWidth(surface.width);
+      offsets.forEach(offset => {
+        if (surface.left == null || surface.top == null) return;
+        const coinX = surface.left + offset;
+        const coin = this.physics.add.staticImage(coinX, surface.top, 'coin')
+          .setDepth(40)
+          .setVisible(true);
+        const coinHeight = coin.displayHeight || coin.height || baseCoinHeight;
+        coin.setY(surface.top - coinHeight * 0.5);
+        if (coin.body?.updateFromGameObject) coin.body.updateFromGameObject();
+        this.coinLayer?.add?.(coin);
+        this.coins.add(coin);
+      });
+    });
+  }
+
+  coinOffsetsForWidth(width) {
+    if (width < 48) return [width / 2];
+    if (width < 112) return [width * 0.5];
+    return [width * 0.35, width * 0.65];
+  }
+
   // Find the top Y of a ground object spanning x, or null
   findGroundTopAtX(objects, x) {
     let best = null;
@@ -540,25 +721,6 @@ export default class LevelScene extends Phaser.Scene {
     }
   }
 
-  // Ensure coins are reachable and aligned to the stage (no floating coins)
-  refineCoinPlacement() {
-    if (!this.coins?.getChildren) return;
-    const worldW = this.physics.world.bounds.width;
-    const stageLeft = 0;
-    const stageRight = worldW;
-    const stageTop = this.stageRect
-      ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
-      : Math.round(this.cameras.main.height - 64);
-    const lift = 48; // coin height above stage surface (jump reach)
-    const coins = this.coins.getChildren();
-    for (const c of coins) {
-      const cx = Math.min(Math.max(Math.round(c.x), stageLeft + 8), stageRight - 8);
-      const cy = stageTop - lift;
-      if (c.setPosition) c.setPosition(cx, cy);
-      if (c.body?.updateFromGameObject) c.body.updateFromGameObject();
-    }
-  }
-
   // Find a supporting ground top considering the player's width
   findGroundSupportTop(objects, x, width) {
     const half = Math.max(1, Math.floor(width / 2));
@@ -571,4 +733,3 @@ export default class LevelScene extends Phaser.Scene {
     return Math.min(...candidates);
   }
 }
-
