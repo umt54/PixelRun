@@ -1,11 +1,13 @@
-import Phaser from 'phaser';
-import levelsData from '../level/levels.json';
-import { DEFAULTS, PHYSICS, UI, CONTROLS, playBeep } from '../config.js';
-import { loadProgress, saveProgress } from '../state/saveSystem.js';
+import Phaser from "phaser";
+import levelsData from "../level/levels.json";
+import { DEFAULTS, PHYSICS, UI, CONTROLS, playBeep } from "../config.js";
+import { loadProgress, saveProgress } from "../state/saveSystem.js";
+
+const PLATFORM_Y_OFFSET = 30;
 
 export default class LevelScene extends Phaser.Scene {
   constructor() {
-    super('LevelScene');
+    super("LevelScene");
     this.levelId = DEFAULTS.START_LEVEL;
     this.score = 0;
     this.timeLeft = DEFAULTS.TIME_LIMIT;
@@ -14,10 +16,10 @@ export default class LevelScene extends Phaser.Scene {
     this.keys = null;
     this.jumpHeldMs = 0;
     this.jumpActive = false;
-    this.facing = 'east';
+    this.facing = "east";
     this.jumpAnimGraceMs = 0; // keep jump anim even if onFloor lingers
     this.jumpMode = null; // 'idle' | 'run'
-    this.jumpFacing = 'east';
+    this.jumpFacing = "east";
     this.spawnPoint = { x: 64, y: 400 };
     this.platformSurfaces = [];
     this.stageLayer = null;
@@ -33,31 +35,33 @@ export default class LevelScene extends Phaser.Scene {
 
   preload() {
     // Load selected level map JSON via an ESM-friendly URL resolution
-    const meta = levelsData.levels.find(l => l.id === this.levelId);
-    if (!meta) throw new Error('Invalid level id');
+    const meta = levelsData.levels.find((l) => l.id === this.levelId);
+    if (!meta) throw new Error("Invalid level id");
     this.levelMeta = meta;
     const url = new URL(`../level/maps/${meta.map}`, import.meta.url);
     this.load.tilemapTiledJSON(`level-${this.levelId}`, url.href);
-    if (!this.textures.exists('platform')) {
-      const platUrl = new URL('../elements/plattform.png', import.meta.url).href;
-      this.load.image('platform', platUrl);
+    if (!this.textures.exists("platform")) {
+      const platUrl = new URL("../elements/plattform.png", import.meta.url)
+        .href;
+      this.load.image("platform", platUrl);
     }
   }
 
   create() {
     try {
       // Camera defaults
-      this.cameras.main.setBackgroundColor('#101428');
+      this.cameras.main.setBackgroundColor("#101428");
 
       // Build level from object layer
       const map = this.make.tilemap({ key: `level-${this.levelId}` });
-      const layer = map ? map.getObjectLayer('Objects') : null;
+      const layer = map ? map.getObjectLayer("Objects") : null;
       if (!layer) {
         throw new Error('Level data missing object layer "Objects"');
       }
       const objects = layer.objects || [];
 
-      const { width: worldWidth, height: worldHeight } = this.computeWorldBounds(objects);
+      const { width: worldWidth, height: worldHeight } =
+        this.computeWorldBounds(objects);
       this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
 
       // Parallax background covering the viewport; repeats horizontally
@@ -70,11 +74,12 @@ export default class LevelScene extends Phaser.Scene {
       }
       const bgHeight = cam.height;
       const bgWidth = Math.max(worldWidth, cam.width);
-      this.bg = this.add.tileSprite(0, 0, bgWidth, bgHeight, 'level_bg')
+      this.bg = this.add
+        .tileSprite(0, 0, bgWidth, bgHeight, "level_bg")
         .setOrigin(0, 0)
         .setScrollFactor(0)
         .setDepth(-1000);
-      const bgSrc = this.textures.get('level_bg')?.getSourceImage?.();
+      const bgSrc = this.textures.get("level_bg")?.getSourceImage?.();
       if (bgSrc && bgSrc.height) {
         const tScale = bgHeight / bgSrc.height;
         this.bg.setTileScale(tScale, tScale);
@@ -84,50 +89,62 @@ export default class LevelScene extends Phaser.Scene {
       this.resetPlatformVisuals(true);
       this.logLayerDepths();
 
-    // Groups
-    this.platforms = this.physics.add.staticGroup();
-    this.hazards = this.physics.add.staticGroup();
-    this.coins = this.physics.add.staticGroup();
-    this.goals = this.physics.add.staticGroup();
+      // Groups
+      this.platforms = this.physics.add.staticGroup();
+      this.hazards = this.physics.add.staticGroup();
+      this.coins = this.physics.add.staticGroup();
+      this.goals = this.physics.add.staticGroup();
 
       // Determine base stage ground (lowest ground rect) and add visible stage image
       this.stageRect = objects
-        .filter(o => o.type === 'ground')
+        .filter((o) => o.type === "ground")
         .reduce((best, o) => (!best || o.y > best.y ? o : best), null);
-      const stageTop = this.stageRect ? Math.round(this.stageRect.y - (this.stageRect.height || 0)) : worldHeight - 64;
-      const stageTex = this.textures.get('stage')?.getSourceImage?.();
+      const stageTop = this.stageRect
+        ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
+        : worldHeight - 64;
+      const stageTex = this.textures.get("stage")?.getSourceImage?.();
       if (stageTex) {
-        const stageHeight = stageTex.height || stageTex.source?.[0]?.height || 64;
-      this.stageImage = this.add.tileSprite(0, stageTop, worldWidth, stageHeight, 'stage')
-        .setOrigin(0, 0)
-        .setDepth(0)
-        .setScrollFactor(1, 1);
-      this.stageLayer.add(this.stageImage);
+        const stageHeight =
+          stageTex.height || stageTex.source?.[0]?.height || 64;
+        this.stageImage = this.add
+          .tileSprite(0, stageTop, worldWidth, stageHeight, "stage")
+          .setOrigin(0, 0)
+          .setDepth(0)
+          .setScrollFactor(1, 1);
+        this.stageLayer.add(this.stageImage);
       }
 
       // Player spawn
-      const spawn = objects.find(o => o.type === 'spawn') || { x: 64, y: 400 };
+      const spawn = objects.find((o) => o.type === "spawn") || {
+        x: 64,
+        y: 400,
+      };
 
-    // Build from objects
-      objects.forEach(obj => {
+      // Build from objects
+      objects.forEach((obj) => {
         const { type, x, y, width = 16, height = 16 } = obj;
-        if (type === 'ground') {
+        if (type === "ground") {
           if (this.isFloatingPlatform({ height })) {
             this.createPlatformSurface({ x, y, width, height });
           } else {
             this.createStageSegment({ x, y, width, height });
           }
-        } else if (type === 'hazard') {
+        } else if (type === "hazard") {
           // Build spikes per 16px tile. Each tile snaps pixelgenau auf die Plattformoberkante.
           const wholeTiles = Math.floor(width / 16);
           const remainder = width % 16;
           const tileLefts = [];
           const tileStart = x;
-          for (let i = 0; i < wholeTiles; i++) tileLefts.push(tileStart + i * 16);
+          for (let i = 0; i < wholeTiles; i++)
+            tileLefts.push(tileStart + i * 16);
           // Decke Restbreite ab, falls >= 8px, indem wir eine letzte Kachel an die rechte Kante setzen
           if (remainder >= 8) {
             const extraLeft = x + width - 16;
-            if (tileLefts.length === 0 || extraLeft > tileLefts[tileLefts.length - 1]) tileLefts.push(extraLeft);
+            if (
+              tileLefts.length === 0 ||
+              extraLeft > tileLefts[tileLefts.length - 1]
+            )
+              tileLefts.push(extraLeft);
           }
           // Falls Breite < 16 war, sorge f++r mindestens eine Kachel
           if (tileLefts.length === 0) tileLefts.push(x);
@@ -139,17 +156,24 @@ export default class LevelScene extends Phaser.Scene {
             const groundTop = Math.round(groundTopRaw);
 
             // Visual: Spike b++ndig auf der Plattformoberkante
-            const spike = this.add.image(tileCenterX, groundTop, 'spike');
+            const spike = this.add.image(tileCenterX, groundTop, "spike");
             spike.setOrigin(0.5, 1);
 
             // Hitbox: exakt 16x16 ++ber der Oberkante (deckungsgleich zur Grafik)
-            const hitbox = this.add.rectangle(tileCenterX, groundTop - 8, 16, 16, 0xd64545, 0.18);
+            const hitbox = this.add.rectangle(
+              tileCenterX,
+              groundTop - 8,
+              16,
+              16,
+              0xd64545,
+              0.18
+            );
             this.physics.add.existing(hitbox, true);
             hitbox._sprite = spike;
             this.hazards.add(hitbox);
           }
-        } else if (type === 'goal') {
-          const flag = this.add.image(x + 8, y - 10, 'flag');
+        } else if (type === "goal") {
+          const flag = this.add.image(x + 8, y - 10, "flag");
           this.physics.add.existing(flag, true);
           this.goals.add(flag);
         }
@@ -168,20 +192,24 @@ export default class LevelScene extends Phaser.Scene {
       if (this.goals?.refresh) this.goals.refresh();
 
       // Player
-      this.player = this.physics.add.sprite(spawn.x, spawn.y, 'char_idle');
+      this.player = this.physics.add.sprite(spawn.x, spawn.y, "char_idle");
       const VISUAL_SCALE = 1; // requested: visual scale 1
       this.player.setScale(VISUAL_SCALE);
-      if (this.player.body?.setAllowGravity) this.player.body.setAllowGravity(false); // avoid initial sink before we settle spawn
+      if (this.player.body?.setAllowGravity)
+        this.player.body.setAllowGravity(false); // avoid initial sink before we settle spawn
       this.player.setCollideWorldBounds(true);
-      this.player.setMaxVelocity(PHYSICS.PLAYER.MAX_VEL_X, PHYSICS.PLAYER.MAX_VEL_Y);
+      this.player.setMaxVelocity(
+        PHYSICS.PLAYER.MAX_VEL_X,
+        PHYSICS.PLAYER.MAX_VEL_Y
+      );
       this.player.setDragX(PHYSICS.PLAYER.DRAG_X);
       this.player.setDepth(50);
       this.playerLayer?.add(this.player);
       // Refit physics body to match scaled sprite size
       const dispW = this.player.displayWidth;
       const dispH = this.player.displayHeight;
-      const bodyW = Math.round(dispW * 0.5);   // narrower than sprite for fair collisions
-      const bodyH = Math.round(dispH * 0.8);   // leave a bit of headroom
+      const bodyW = Math.round(dispW * 0.5); // narrower than sprite for fair collisions
+      const bodyH = Math.round(dispH * 0.8); // leave a bit of headroom
       const offsetX = Math.round((dispW - bodyW) / 2);
       const offsetY = Math.round(dispH - bodyH - 2); // small foot clearance
 
@@ -192,68 +220,85 @@ export default class LevelScene extends Phaser.Scene {
 
       this.player.setBodySize(unscaledW, unscaledH);
       this.player.setOffset(unscaledOffX, unscaledOffY);
-      if (this.player.body?.updateFromGameObject) this.player.body.updateFromGameObject();
+      if (this.player.body?.updateFromGameObject)
+        this.player.body.updateFromGameObject();
 
       // Snap the player precisely onto the stage top (no drop)
-      const supportTop = this.stageRect ? Math.round(this.stageRect.y - (this.stageRect.height || 0)) : this.findGroundSupportTop(objects, spawn.x, this.player.body.width);
+      const supportTop = this.stageRect
+        ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
+        : this.findGroundSupportTop(objects, spawn.x, this.player.body.width);
       if (supportTop != null) {
         // Place so the bottom of the physics body sits on the ground
         const desiredTop = Math.round(supportTop - this.player.body.height - 1);
-        const desiredSpriteY = desiredTop + (this.player.displayHeight / 2) - this.player.body.offset.y;
+        const desiredSpriteY =
+          desiredTop +
+          this.player.displayHeight / 2 -
+          this.player.body.offset.y;
         // Reset fully to avoid initial penetration and clear velocities
         if (this.player.body?.reset) {
           this.player.body.reset(this.player.x, desiredSpriteY);
         } else {
           this.player.setY(desiredSpriteY);
-          if (this.player.body?.updateFromGameObject) this.player.body.updateFromGameObject();
+          if (this.player.body?.updateFromGameObject)
+            this.player.body.updateFromGameObject();
         }
         this.spawnPoint = { x: spawn.x, y: desiredSpriteY };
       }
 
-    // Animations
-    if (!this.anims.exists('run_east')) {
-      this.anims.create({
-        key: 'run_east',
-        frames: [
-          { key: 'char_run_0' },
-          { key: 'char_run_1' },
-          { key: 'char_run_2' },
-          { key: 'char_run_3' }
-        ],
-        frameRate: 10,
-        repeat: -1
-      });
-    }
-    if (!this.anims.exists('run_west')) {
-      this.anims.create({
-        key: 'run_west',
-        frames: [
-          { key: 'char_run_w_0' },
-          { key: 'char_run_w_1' },
-          { key: 'char_run_w_2' },
-          { key: 'char_run_w_3' }
-        ],
-        frameRate: 10,
-        repeat: -1
-      });
-    }
-    if (!this.anims.exists('idle')) {
-      this.anims.create({ key: 'idle', frames: [{ key: 'char_idle' }], frameRate: 1 });
-    }
-    if (!this.anims.exists('jump')) {
-      this.anims.create({ key: 'jump', frames: [{ key: 'char_jump' }], frameRate: 1 });
-    }
+      // Animations
+      if (!this.anims.exists("run_east")) {
+        this.anims.create({
+          key: "run_east",
+          frames: [
+            { key: "char_run_0" },
+            { key: "char_run_1" },
+            { key: "char_run_2" },
+            { key: "char_run_3" },
+          ],
+          frameRate: 10,
+          repeat: -1,
+        });
+      }
+      if (!this.anims.exists("run_west")) {
+        this.anims.create({
+          key: "run_west",
+          frames: [
+            { key: "char_run_w_0" },
+            { key: "char_run_w_1" },
+            { key: "char_run_w_2" },
+            { key: "char_run_w_3" },
+          ],
+          frameRate: 10,
+          repeat: -1,
+        });
+      }
+      if (!this.anims.exists("idle")) {
+        this.anims.create({
+          key: "idle",
+          frames: [{ key: "char_idle" }],
+          frameRate: 1,
+        });
+      }
+      if (!this.anims.exists("jump")) {
+        this.anims.create({
+          key: "jump",
+          frames: [{ key: "char_jump" }],
+          frameRate: 1,
+        });
+      }
 
-    // Physics
+      // Physics
       this.physics.add.collider(this.player, this.platforms);
 
       this.physics.add.overlap(this.player, this.coins, (player, coin) => {
         coin.destroy();
         this.score += UI.SCORE_PER_COIN;
-        this.game.events.emit('score:add', UI.SCORE_PER_COIN, this.score);
-        playBeep(this, 1046, 80, 'square');
+        this.game.events.emit("score:add", UI.SCORE_PER_COIN, this.score);
+        playBeep(this, 1046, 80, "square");
         // Level ends when all coins are collected
-        const remaining = (this.coins.getChildren() || []).filter(c => c.active).length;
+        const remaining = (this.coins.getChildren() || []).filter(
+          (c) => c.active
+        ).length;
         if (remaining === 0) {
           this.onLevelComplete();
         }
@@ -266,38 +311,52 @@ export default class LevelScene extends Phaser.Scene {
       // goal objects no longer used; completion via coins only
 
       // Now that colliders are set and spawn is adjusted, enable gravity
-      if (this.player.body?.setAllowGravity) this.player.body.setAllowGravity(true);
+      if (this.player.body?.setAllowGravity)
+        this.player.body.setAllowGravity(true);
 
-    // Controls
+      // Controls
       this.cursors = this.input.keyboard.createCursorKeys();
       this.keys = this.input.keyboard.addKeys({
-        W: 'W',
-        A: 'A',
-        D: 'D',
-        SPACE: 'SPACE',
-        M: CONTROLS.MUTE_TOGGLE_KEY
+        W: "W",
+        A: "A",
+        D: "D",
+        SPACE: "SPACE",
+        M: CONTROLS.MUTE_TOGGLE_KEY,
       });
 
-
-    // Camera
+      // Camera
       this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
       this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
       this.cameras.main.setDeadzone(120, 80);
 
-    // HUD / UI
-      this.scene.run('UIScene', { score: this.score });
+      // HUD / UI
+      this.scene.run("UIScene", { score: this.score });
 
-    // Listen UI timer
+      // Listen UI timer
       // no timer/pause listeners
 
-      playBeep(this, 700, 60, 'triangle');
+      playBeep(this, 700, 60, "triangle");
     } catch (err) {
       // Show a friendly in-game error message instead of a blank screen
-      console.error('Level load error:', err);
-      const msg = 'Fehler beim Laden des Levels. Dr++cke ESC f++r Men++.';
-      this.add.text(400, 220, msg, { fontSize: 18, color: '#E7F0FF', align: 'center' }).setOrigin(0.5);
-      this.add.text(400, 260, String(err?.message || err), { fontSize: 14, color: '#A0A8BD', align: 'center' }).setOrigin(0.5);
-      this.input.keyboard.once('keydown-ESC', () => this.scene.start('MainMenuScene'));
+      console.error("Level load error:", err);
+      const msg = "Fehler beim Laden des Levels. Dr++cke ESC f++r Men++.";
+      this.add
+        .text(400, 220, msg, {
+          fontSize: 18,
+          color: "#E7F0FF",
+          align: "center",
+        })
+        .setOrigin(0.5);
+      this.add
+        .text(400, 260, String(err?.message || err), {
+          fontSize: 14,
+          color: "#A0A8BD",
+          align: "center",
+        })
+        .setOrigin(0.5);
+      this.input.keyboard.once("keydown-ESC", () =>
+        this.scene.start("MainMenuScene")
+      );
     }
   }
 
@@ -312,14 +371,17 @@ export default class LevelScene extends Phaser.Scene {
     let maxX = MIN_WIDTH;
     let maxY = MIN_HEIGHT;
 
-    objects.forEach(obj => {
+    objects.forEach((obj) => {
       const objWidth = obj.width || 0;
       const objHeight = obj.height || 0;
       maxX = Math.max(maxX, obj.x + objWidth);
       maxY = Math.max(maxY, obj.y + objHeight);
     });
 
-    return { width: Math.max(maxX, MIN_WIDTH), height: Math.max(maxY, MIN_HEIGHT) };
+    return {
+      width: Math.max(maxX, MIN_WIDTH),
+      height: Math.max(maxY, MIN_HEIGHT),
+    };
   }
 
   shutdown() {
@@ -327,28 +389,28 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   onPlayerDeath() {
-    playBeep(this, 180, 150, 'sawtooth');
+    playBeep(this, 180, 150, "sawtooth");
     this.respawnPlayer();
   }
 
   onLevelComplete() {
-    playBeep(this, 880, 120, 'triangle');
+    playBeep(this, 880, 120, "triangle");
     // Unlock next level and save highscore if improved
     const nextLevel = Math.min(this.levelId + 1, DEFAULTS.MAX_LEVELS);
     const progress = loadProgress();
     const updated = saveProgress({
       unlockedLevel: Math.max(progress.unlockedLevel, nextLevel),
-      highScore: Math.max(progress.highScore, this.score)
+      highScore: Math.max(progress.highScore, this.score),
     });
 
     // If last level, go to GameOver summary
-    this.scene.stop('UIScene');
+    this.scene.stop("UIScene");
     if (this.levelId >= DEFAULTS.MAX_LEVELS) {
-      this.scene.start('GameOverScene', {
+      this.scene.start("GameOverScene", {
         levelId: this.levelId,
         score: this.score,
-        reason: 'complete',
-        final: true
+        reason: "complete",
+        final: true,
       });
     } else {
       // Continue to next level
@@ -372,12 +434,13 @@ export default class LevelScene extends Phaser.Scene {
       this.player.body.reset(p.x, p.y);
     } else {
       this.player.setPosition(p.x, p.y);
-      if (this.player.body?.updateFromGameObject) this.player.body.updateFromGameObject();
+      if (this.player.body?.updateFromGameObject)
+        this.player.body.updateFromGameObject();
     }
     // Face right by default at spawn
-    this.facing = 'east';
+    this.facing = "east";
     this.player.anims.stop();
-    this.player.setTexture('char_rot_e');
+    this.player.setTexture("char_rot_e");
   }
 
   update(time, delta) {
@@ -388,16 +451,20 @@ export default class LevelScene extends Phaser.Scene {
 
     const left = this.cursors.left.isDown || this.keys.A.isDown;
     const right = this.cursors.right.isDown || this.keys.D.isDown;
-    const upPressed = Phaser.Input.Keyboard.JustDown(this.cursors.up) || Phaser.Input.Keyboard.JustDown(this.keys.W) || Phaser.Input.Keyboard.JustDown(this.keys.SPACE);
-    const upDown = this.cursors.up.isDown || this.keys.W.isDown || this.keys.SPACE.isDown;
+    const upPressed =
+      Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
+      Phaser.Input.Keyboard.JustDown(this.keys.W) ||
+      Phaser.Input.Keyboard.JustDown(this.keys.SPACE);
+    const upDown =
+      this.cursors.up.isDown || this.keys.W.isDown || this.keys.SPACE.isDown;
 
     // Horizontal movement via acceleration
     if (left) {
       this.player.setAccelerationX(-PHYSICS.PLAYER.ACCEL);
-      this.facing = 'west';
+      this.facing = "west";
     } else if (right) {
       this.player.setAccelerationX(PHYSICS.PLAYER.ACCEL);
-      this.facing = 'east';
+      this.facing = "east";
     } else {
       this.player.setAccelerationX(0);
     }
@@ -414,14 +481,19 @@ export default class LevelScene extends Phaser.Scene {
       justJumped = true;
       this.jumpAnimGraceMs = 140; // ms to ensure animation shows reliably
       // Snapshot jump mode and facing at takeoff
-      this.jumpMode = (left || right) ? 'run' : 'idle';
+      this.jumpMode = left || right ? "run" : "idle";
       this.jumpFacing = this.facing;
-      const takeoffKey = this.jumpMode === 'run'
-        ? (this.jumpFacing === 'west' ? 'run_jump_west' : 'run_jump_east')
-        : (this.jumpFacing === 'west' ? 'jump_west' : 'jump_east');
+      const takeoffKey =
+        this.jumpMode === "run"
+          ? this.jumpFacing === "west"
+            ? "run_jump_west"
+            : "run_jump_east"
+          : this.jumpFacing === "west"
+          ? "jump_west"
+          : "jump_east";
       // Force-restart jump animation at takeoff (ignoreIfPlaying = false)
       this.player.play(takeoffKey);
-      playBeep(this, 520, 80, 'triangle');
+      playBeep(this, 520, 80, "triangle");
     }
 
     // Variable jump height by hold duration
@@ -443,21 +515,29 @@ export default class LevelScene extends Phaser.Scene {
     const airborne = justJumped || !onFloor || this.jumpAnimGraceMs > 0;
     if (airborne) {
       // Keep the jump animation chosen at takeoff until landing
-      const mode = this.jumpMode || ((left || right) ? 'run' : 'idle');
+      const mode = this.jumpMode || (left || right ? "run" : "idle");
       const face = this.jumpFacing || this.facing;
-      const key = mode === 'run'
-        ? (face === 'west' ? 'run_jump_west' : 'run_jump_east')
-        : (face === 'west' ? 'jump_west' : 'jump_east');
-      if (this.player.anims.currentAnim?.key !== key) this.player.play(key, true);
+      const key =
+        mode === "run"
+          ? face === "west"
+            ? "run_jump_west"
+            : "run_jump_east"
+          : face === "west"
+          ? "jump_west"
+          : "jump_east";
+      if (this.player.anims.currentAnim?.key !== key)
+        this.player.play(key, true);
     } else if (Math.abs(vx) > 10) {
       if (vx > 0) {
-        if (this.player.anims.currentAnim?.key !== 'run_east') this.player.play('run_east', true);
+        if (this.player.anims.currentAnim?.key !== "run_east")
+          this.player.play("run_east", true);
       } else {
-        if (this.player.anims.currentAnim?.key !== 'run_west') this.player.play('run_west', true);
+        if (this.player.anims.currentAnim?.key !== "run_west")
+          this.player.play("run_west", true);
       }
     } else {
       // Idle should be a static facing frame (rotations east/west)
-      const idleKey = this.facing === 'west' ? 'char_rot_w' : 'char_rot_e';
+      const idleKey = this.facing === "west" ? "char_rot_w" : "char_rot_e";
       this.player.anims.stop();
       this.player.setTexture(idleKey);
     }
@@ -472,9 +552,9 @@ export default class LevelScene extends Phaser.Scene {
   directionKeyFor(vx, _vy) {
     const ax = Math.abs(vx);
     if (ax > 30) {
-      return vx > 0 ? 'char_rot_e' : 'char_rot_w';
+      return vx > 0 ? "char_rot_e" : "char_rot_w";
     }
-    return this.facing === 'west' ? 'char_rot_w' : 'char_rot_e';
+    return this.facing === "west" ? "char_rot_w" : "char_rot_e";
   }
 
   initializeRenderLayers() {
@@ -504,11 +584,11 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   logLayerDepths() {
-    console.log('LAYER DEPTHS', {
+    console.log("LAYER DEPTHS", {
       stage: this.stageLayer?.depth,
       platform: this.platformLayer?.depth,
       coin: this.coinLayer?.depth,
-      player: this.playerLayer?.depth
+      player: this.playerLayer?.depth,
     });
   }
 
@@ -523,14 +603,13 @@ export default class LevelScene extends Phaser.Scene {
       this.platformSurfaces = [];
       return;
     }
-    this.platformSurfaces.forEach(surface => {
+    this.platformSurfaces.forEach((surface) => {
       if (surface?.visuals?.length) {
-        surface.visuals.forEach(v => v?.destroy?.());
+        surface.visuals.forEach((v) => v?.destroy?.());
       }
       surface.visuals = [];
     });
   }
-
 
   isFloatingPlatform({ height }) {
     return (height || 0) > 0 && (height || 0) <= 20;
@@ -539,7 +618,7 @@ export default class LevelScene extends Phaser.Scene {
   createStageSegment({ x, y, width = 32, height = 16 }) {
     const centerX = x + width / 2;
     const centerY = y - height / 2;
-    const chunk = this.physics.add.staticImage(centerX, centerY, 'ground');
+    const chunk = this.physics.add.staticImage(centerX, centerY, "ground");
     chunk.displayWidth = width;
     chunk.displayHeight = height;
     chunk.setVisible(false);
@@ -552,9 +631,17 @@ export default class LevelScene extends Phaser.Scene {
     const centerX = x + width / 2;
     const centerY = top + height / 2;
 
-    const collider = this.add.rectangle(centerX, centerY, width, height, 0xffffff, 0);
+    const collider = this.add.rectangle(
+      centerX,
+      centerY,
+      width,
+      height,
+      0xffffff,
+      0
+    );
     this.physics.add.existing(collider, true);
-    if (collider.body?.updateFromGameObject) collider.body.updateFromGameObject();
+    if (collider.body?.updateFromGameObject)
+      collider.body.updateFromGameObject();
     this.platforms.add(collider);
 
     const left = Math.round(x);
@@ -563,6 +650,29 @@ export default class LevelScene extends Phaser.Scene {
     const heightPx = Math.max(1, Math.round(height));
     const visuals = this.stampPlatformOnLine(left, topPx, widthPx, heightPx);
 
+    // >>> Hitbox an die sichtbare plattform.png angleichen <<<
+    if (visuals && visuals[0]) {
+      const v = visuals[0]; // das Sprite aus plattform.png
+      const vW = v.displayWidth; // aktuell 140
+      const vH = v.displayHeight; // aktuell 60
+      // Sprite hat Origin (0, 1): x = left, y = top (oben auf Linie)
+      const vCenterX = v.x + vW / 2; // centerX = left + width/2
+      const vCenterY = v.y - vH / 2; // centerY = top - height/2
+
+      // Collider exakt auf die Grafik zentrieren + Größe angleichen
+      collider.setPosition(vCenterX, vCenterY);
+      collider.width = vW;
+      collider.height = vH;
+
+      // Arcade-Static-Body aktualisieren
+      if (collider.body?.setSize) {
+        collider.body.setSize(vW, vH); // falls verfügbar
+      }
+      if (collider.body?.updateFromGameObject) {
+        collider.body.updateFromGameObject();
+      }
+    }
+
     const surfaceRecord = {
       left,
       right: left + widthPx,
@@ -570,50 +680,92 @@ export default class LevelScene extends Phaser.Scene {
       height: heightPx,
       top: topPx,
       collider,
-      visuals
+      visuals,
     };
     this.platformSurfaces.push(surfaceRecord);
   }
 
   buildVisiblePlatformsFromLines() {
-    if (!this.textures.exists('platform')) {
-      console.error('platform texture missing');
+    if (!this.textures.exists("platform")) {
+      console.error("platform texture missing");
       return;
     }
 
-    this.platformSurfaces.forEach(surface => {
+    this.platformSurfaces.forEach((surface) => {
       const { collider } = surface;
       const body = collider?.body;
       if (!body) return;
 
+      // 1) Body-Position lesen (aktueller Collider-Stand)
       const left = Math.round(body.left);
       const right = Math.round(body.right);
       const top = Math.round(body.top);
       const widthPx = Math.max(1, Math.round(right - left));
 
+      // 2) Surface-Geometrie updaten
       surface.left = left;
       surface.right = left + widthPx;
       surface.width = widthPx;
       surface.top = top;
+
+      // 3) Visuals erzeugen/positionieren (Sprite hat Origin (0,1) an (left, top))
       if (!surface.visuals?.length) {
-        surface.visuals = this.stampPlatformOnLine(left, top, widthPx, surface.height);
+        surface.visuals = this.stampPlatformOnLine(
+          left,
+          top,
+          widthPx,
+          surface.height
+        );
       } else {
-        this.positionPlatformVisuals(surface, left, top, widthPx, surface.height);
+        this.positionPlatformVisuals(
+          surface,
+          left,
+          top,
+          widthPx,
+          surface.height
+        );
+      }
+
+      // 4) >>> Hitbox an die sichtbare plattform.png angleichen <<<
+      const v = surface.visuals?.[0];
+      if (v) {
+        const vW = v.displayWidth;
+        const vH = v.displayHeight;
+        const vCenterX = v.x + vW / 2; // weil Origin (0,1)
+        const vCenterY = v.y - vH / 2;
+
+        collider.setPosition(vCenterX, vCenterY);
+        // diese beiden ändern nur das Display-Rechteck des Rectangle-GameObjects,
+        // die Arcade-Hitbox stellst du mit body.setSize ein:
+        collider.width = vW;
+        collider.height = vH;
+
+        if (collider.body?.setSize) {
+          collider.body.setSize(vW, vH); // eigentliche Hitbox-Größe
+          collider.body.updateFromGameObject?.(); // statischen Body neu berechnen
+        }
+
+        // 5) Optional: surface-Koordinaten an die (neue) Body-Lage anpassen
+        surface.left = Math.round(collider.body.left);
+        surface.right = Math.round(collider.body.right);
+        surface.top = Math.round(collider.body.top);
+        surface.width = Math.round(collider.body.right - collider.body.left);
       }
     });
   }
 
   stampPlatformOnLine(left, top, widthPx, heightPx = 16) {
-    const source = this.textures.get('platform')?.getSourceImage?.();
+    const source = this.textures.get("platform")?.getSourceImage?.();
     if (!source) {
-      console.error('platform texture missing');
+      console.error("platform texture missing");
       return [];
     }
     const lineLeft = Math.round(left);
-    const lineTop = Math.round(top);
-    const width = Math.max(1, Math.round(widthPx));
-    const height = Math.max(1, Math.round(heightPx || source.height || 16));
-    const sprite = this.add.image(lineLeft, lineTop, 'platform')
+    const lineTop = Math.round(top + PLATFORM_Y_OFFSET);
+    const width = 140;
+    const height = 60;
+    const sprite = this.add
+      .image(lineLeft, lineTop, "platform")
       .setOrigin(0, 1)
       .setDepth(20)
       .setScrollFactor(1)
@@ -625,11 +777,11 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   positionPlatformVisuals(surface, left, top, widthPx, heightPx = 16) {
-    const width = Math.max(1, Math.round(widthPx));
-    const height = Math.max(1, Math.round(heightPx));
+    const width = 140;
+    const height = 60;
     const posX = Math.round(left);
-    const posY = Math.round(top);
-    (surface.visuals || []).forEach(sprite => {
+    const posY = Math.round(top + PLATFORM_Y_OFFSET);
+    (surface.visuals || []).forEach((sprite) => {
       if (!sprite) return;
       sprite.setPosition(posX, posY);
       sprite.setDisplaySize(width, height);
@@ -645,15 +797,16 @@ export default class LevelScene extends Phaser.Scene {
     if (this.coins.clear) this.coins.clear(true, true);
     this.coinLayer?.removeAll(true);
 
-    const coinTex = this.textures.get('coin')?.getSourceImage?.();
+    const coinTex = this.textures.get("coin")?.getSourceImage?.();
     const baseCoinHeight = coinTex?.height || 16;
 
-    this.platformSurfaces.forEach(surface => {
+    this.platformSurfaces.forEach((surface) => {
       const offsets = this.coinOffsetsForWidth(surface.width);
-      offsets.forEach(offset => {
+      offsets.forEach((offset) => {
         if (surface.left == null || surface.top == null) return;
         const coinX = surface.left + offset;
-        const coin = this.physics.add.staticImage(coinX, surface.top, 'coin')
+        const coin = this.physics.add
+          .staticImage(coinX, surface.top, "coin")
           .setDepth(40)
           .setVisible(true);
         const coinHeight = coin.displayHeight || coin.height || baseCoinHeight;
@@ -675,7 +828,7 @@ export default class LevelScene extends Phaser.Scene {
   findGroundTopAtX(objects, x) {
     let best = null;
     for (const obj of objects) {
-      if (obj.type !== 'ground') continue;
+      if (obj.type !== "ground") continue;
       const left = obj.x;
       const right = obj.x + (obj.width || 0);
       if (x >= left && x <= right) {
@@ -691,7 +844,7 @@ export default class LevelScene extends Phaser.Scene {
     let bestObj = null;
     let bestTop = Number.POSITIVE_INFINITY;
     for (const obj of objects) {
-      if (obj.type !== 'ground') continue;
+      if (obj.type !== "ground") continue;
       const left = obj.x;
       const right = obj.x + (obj.width || 0);
       if (x >= left && x <= right) {
@@ -708,7 +861,10 @@ export default class LevelScene extends Phaser.Scene {
   // Nudge/remove spikes so they sit fully on platforms, never on background, and not over edges
   refineSpikePlacement(objects) {
     if (!this.hazards?.getChildren) return;
-    const hazards = this.hazards.getChildren().slice().sort((a, b) => a.x - b.x);
+    const hazards = this.hazards
+      .getChildren()
+      .slice()
+      .sort((a, b) => a.x - b.x);
     const worldW = this.physics.world.bounds.width;
     const stageTop = this.stageRect
       ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
@@ -719,7 +875,10 @@ export default class LevelScene extends Phaser.Scene {
     const kept = [];
     for (const h of hazards) {
       // Clamp within stage and snap to 16px grid
-      const clampedX = Math.min(Math.max(Math.round(h.x), stageLeft + 8), stageRight - 8);
+      const clampedX = Math.min(
+        Math.max(Math.round(h.x), stageLeft + 8),
+        stageRight - 8
+      );
       const idx = Math.round((clampedX - (stageLeft + 8)) / 16);
       if (seen.has(idx)) {
         // duplicate/overlap -> remove
@@ -732,7 +891,10 @@ export default class LevelScene extends Phaser.Scene {
       // Place flush on stage top
       if (h.setPosition) h.setPosition(stageLeft + 8 + idx * 16, stageTop - 8);
       if (h.body?.updateFromGameObject) h.body.updateFromGameObject();
-      if (h._sprite?.setPosition) h._sprite.setPosition(stageLeft + 8 + idx * 16, stageTop).setOrigin(0.5, 1);
+      if (h._sprite?.setPosition)
+        h._sprite
+          .setPosition(stageLeft + 8 + idx * 16, stageTop)
+          .setOrigin(0.5, 1);
     }
   }
 
@@ -743,7 +905,7 @@ export default class LevelScene extends Phaser.Scene {
     const b = this.findGroundTopAtX(objects, x);
     const c = this.findGroundTopAtX(objects, x + half);
     // Choose the highest available support (smallest Y)
-    const candidates = [a, b, c].filter(v => v != null);
+    const candidates = [a, b, c].filter((v) => v != null);
     if (!candidates.length) return null;
     return Math.min(...candidates);
   }
