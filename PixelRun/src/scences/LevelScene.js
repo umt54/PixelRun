@@ -33,11 +33,17 @@ export default class LevelScene extends Phaser.Scene {
     this.allCoinsCollected = false;
     this.goalWarningCooldown = 0;
     this.isLevelComplete = false;
+    this.levelCoinTotal = 0;
+    this.levelCoinsCollected = 0;
+    this.coinProgressRetryTimer = null;
   }
 
   init(data) {
     this.levelId = data.levelId ?? DEFAULTS.START_LEVEL;
     this.score = data.scoreCarry ?? 0;
+    this.levelCoinTotal = 0;
+    this.levelCoinsCollected = 0;
+    this.coinProgressRetryTimer = null;
   }
 
   preload() {
@@ -330,10 +336,16 @@ export default class LevelScene extends Phaser.Scene {
       this.physics.add.collider(this.player, this.platforms);
 
       this.physics.add.overlap(this.player, this.coins, (player, coin) => {
+        if (!coin?.active) return;
         coin.destroy();
         this.score += UI.SCORE_PER_COIN;
         this.game.events.emit("score:add", UI.SCORE_PER_COIN, this.score);
         playBeep(this, 1046, 80, "square");
+        this.levelCoinsCollected = Math.min(
+          this.levelCoinsCollected + 1,
+          this.levelCoinTotal || Number.MAX_SAFE_INTEGER
+        );
+        this.emitCoinProgress();
         // Track remaining coins and require the flag to finish
         if (this.getRemainingActiveCoins() === 0) {
           this.allCoinsCollected = true;
@@ -373,7 +385,15 @@ export default class LevelScene extends Phaser.Scene {
       this.cameras.main.setDeadzone(120, 80);
 
       // HUD / UI
-      this.scene.run("UIScene", { score: this.score });
+      this.scene.stop("UIScene");
+      this.scene.run("UIScene", {
+        score: this.score,
+        coinInfo: {
+          collected: this.levelCoinsCollected,
+          remaining: this.getRemainingActiveCoins(),
+          total: this.levelCoinTotal,
+        },
+      });
 
       playBeep(this, 700, 60, "triangle");
     } catch (err) {
@@ -425,7 +445,7 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   shutdown() {
-    // no timer/pause cleanup needed anymore
+    this.clearCoinProgressRetryTimer();
   }
 
   onPlayerDeath() {
@@ -447,16 +467,24 @@ export default class LevelScene extends Phaser.Scene {
 
     // If last level, go to GameOver summary
     this.scene.stop("UIScene");
+    this.clearCoinProgressRetryTimer();
     if (this.levelId >= DEFAULTS.MAX_LEVELS) {
-      this.scene.start("GameOverScene", {
-        levelId: this.levelId,
-        score: this.score,
-        reason: "complete",
-        final: true,
+      this.time.delayedCall(0, () => {
+        this.scene.start("GameOverScene", {
+          levelId: this.levelId,
+          score: this.score,
+          reason: "complete",
+          final: true,
+        });
       });
     } else {
-      // Continue to next level
-      this.scene.restart({ levelId: this.levelId + 1, scoreCarry: this.score });
+      // Hand over to a tiny bridge scene so LevelScene can reboot cleanly.
+      this.time.delayedCall(0, () => {
+        this.scene.start("LevelTransitionScene", {
+          levelId: this.levelId + 1,
+          scoreCarry: this.score,
+        });
+      });
     }
   }
 
@@ -833,6 +861,10 @@ export default class LevelScene extends Phaser.Scene {
         this.coins.add(coin);
       });
     });
+    const activeCoins = this.getRemainingActiveCoins();
+    this.levelCoinTotal = activeCoins;
+    this.levelCoinsCollected = 0;
+    this.emitCoinProgress();
   }
 
   coinOffsetsForWidth(width) {
@@ -1019,7 +1051,38 @@ export default class LevelScene extends Phaser.Scene {
     return (this.coins?.getChildren?.() || []).filter((c) => c.active).length;
   }
 
+  emitCoinProgress() {
+    if (!this.scene?.isActive?.("UIScene")) {
+      if (!this.coinProgressRetryTimer && this.time) {
+        this.coinProgressRetryTimer = this.time.delayedCall(16, () => {
+          this.coinProgressRetryTimer = null;
+          this.emitCoinProgress();
+        });
+      }
+      return;
+    }
+    this.clearCoinProgressRetryTimer();
+    const remaining = this.getRemainingActiveCoins();
+    const total = Math.max(
+      this.levelCoinTotal || 0,
+      remaining + (this.levelCoinsCollected || 0)
+    );
+    const collected = Math.min(this.levelCoinsCollected || 0, total);
+    this.game?.events?.emit("coins:update", {
+      collected,
+      remaining,
+      total,
+    });
+  }
+
   notifyUI(message, duration = 2000) {
     this.game?.events?.emit("ui:notify", message, duration);
+  }
+
+  clearCoinProgressRetryTimer() {
+    if (this.coinProgressRetryTimer) {
+      this.coinProgressRetryTimer.remove(false);
+      this.coinProgressRetryTimer = null;
+    }
   }
 }

@@ -6,6 +6,7 @@ import MainMenuScene from './scences/MainMenuScene.js';
 import LevelScene from './scences/LevelScene.js';
 import UIScene from './scences/UIScene.js';
 import GameOverScene from './scences/GameOverScene.js';
+import LevelTransitionScene from './scences/LevelTransitionScene.js';
 
 const config = {
   type: Phaser.AUTO,
@@ -31,6 +32,7 @@ const config = {
     PreloadScene,
     MainMenuScene,
     LevelScene,
+    LevelTransitionScene,
     UIScene,
     GameOverScene
   ]
