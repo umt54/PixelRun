@@ -3,7 +3,9 @@ import levelsData from "../level/levels.json";
 import { DEFAULTS, PHYSICS, UI, CONTROLS, playBeep } from "../config.js";
 import { loadProgress, saveProgress } from "../state/saveSystem.js";
 
-const PLATFORM_Y_OFFSET = 30;
+// Grafik nach unten rücken (nur VISUELL)
+const PLATFORM_Y_OFFSET = 40;
+
 
 export default class LevelScene extends Phaser.Scene {
   constructor() {
@@ -22,10 +24,15 @@ export default class LevelScene extends Phaser.Scene {
     this.jumpFacing = "east";
     this.spawnPoint = { x: 64, y: 400 };
     this.platformSurfaces = [];
+    this.platformTextureKey = "platform";
+    this.platformDisplaySize = { width: 140, height: 60 };
     this.stageLayer = null;
     this.platformLayer = null;
     this.coinLayer = null;
     this.playerLayer = null;
+    this.allCoinsCollected = false;
+    this.goalWarningCooldown = 0;
+    this.isLevelComplete = false;
   }
 
   init(data) {
@@ -45,12 +52,29 @@ export default class LevelScene extends Phaser.Scene {
         .href;
       this.load.image("platform", platUrl);
     }
+    if (this.levelId === 2 && !this.textures.exists("platform_snow")) {
+      const snowPlatUrl = new URL(
+        "../elements/snow-plattform.png",
+        import.meta.url
+      ).href;
+      this.load.image("platform_snow", snowPlatUrl);
+    }
+    if (this.levelId === 3 && !this.textures.exists("platform_desert")) {
+      const desertPlatUrl = new URL(
+        "../elements/desert-plattform.png",
+        import.meta.url
+      ).href;
+      this.load.image("platform_desert", desertPlatUrl);
+    }
   }
 
   create() {
     try {
       // Camera defaults
       this.cameras.main.setBackgroundColor("#101428");
+      this.allCoinsCollected = false;
+      this.goalWarningCooldown = 0;
+      this.isLevelComplete = false;
 
       // Build level from object layer
       const map = this.make.tilemap({ key: `level-${this.levelId}` });
@@ -72,19 +96,22 @@ export default class LevelScene extends Phaser.Scene {
         canvas.style.width = `${canvas.width}px`;
         canvas.style.height = `${canvas.height}px`;
       }
+      const bgKey = this.getBackgroundTextureKey();
       const bgHeight = cam.height;
       const bgWidth = Math.max(worldWidth, cam.width);
       this.bg = this.add
-        .tileSprite(0, 0, bgWidth, bgHeight, "level_bg")
+        .tileSprite(0, 0, bgWidth, bgHeight, bgKey)
         .setOrigin(0, 0)
         .setScrollFactor(0)
         .setDepth(-1000);
-      const bgSrc = this.textures.get("level_bg")?.getSourceImage?.();
+      const bgSrc = this.textures.get(bgKey)?.getSourceImage?.();
       if (bgSrc && bgSrc.height) {
         const tScale = bgHeight / bgSrc.height;
         this.bg.setTileScale(tScale, tScale);
       }
 
+      this.platformTextureKey = this.getPlatformTextureKey();
+      this.platformDisplaySize = this.getPlatformDisplaySize();
       this.initializeRenderLayers();
       this.resetPlatformVisuals(true);
       this.logLayerDepths();
@@ -102,15 +129,25 @@ export default class LevelScene extends Phaser.Scene {
       const stageTop = this.stageRect
         ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
         : worldHeight - 64;
-      const stageTex = this.textures.get("stage")?.getSourceImage?.();
-      if (stageTex) {
-        const stageHeight =
+      const stageVisual = this.getStageVisualConfig();
+      const stageKey = stageVisual.key;
+      const stageTex = stageKey
+        ? this.textures.get(stageKey)?.getSourceImage?.()
+        : null;
+      if (stageKey && stageTex) {
+        const texHeight =
           stageTex.height || stageTex.source?.[0]?.height || 64;
+        const stageHeight = stageVisual.height ?? texHeight;
         this.stageImage = this.add
-          .tileSprite(0, stageTop, worldWidth, stageHeight, "stage")
+          .tileSprite(0, stageTop, worldWidth, stageHeight, stageKey)
           .setOrigin(0, 0)
           .setDepth(0)
           .setScrollFactor(1, 1);
+        const tileScaleX = stageVisual.scaleX ?? 1;
+        const tileScaleY =
+          stageVisual.scaleY ??
+          (texHeight ? stageHeight / texHeight : 1);
+        this.stageImage.setTileScale(tileScaleX, tileScaleY);
         this.stageLayer.add(this.stageImage);
       }
 
@@ -146,20 +183,20 @@ export default class LevelScene extends Phaser.Scene {
             )
               tileLefts.push(extraLeft);
           }
-          // Falls Breite < 16 war, sorge f++r mindestens eine Kachel
+          // Falls Breite < 16 war, sorge für mindestens eine Kachel
           if (tileLefts.length === 0) tileLefts.push(x);
 
           for (const leftPos of tileLefts) {
             const tileCenterX = Math.round(leftPos + 8);
             const groundTopRaw = this.findGroundTopAtX(objects, tileCenterX);
-            if (groundTopRaw == null) continue; // keine Unterst++tzung -> keine Spike
+            if (groundTopRaw == null) continue; // keine Untersttzung -> keine Spike
             const groundTop = Math.round(groundTopRaw);
 
-            // Visual: Spike b++ndig auf der Plattformoberkante
+            // Visual: Spike bündig auf der Plattformoberkante
             const spike = this.add.image(tileCenterX, groundTop, "spike");
             spike.setOrigin(0.5, 1);
 
-            // Hitbox: exakt 16x16 ++ber der Oberkante (deckungsgleich zur Grafik)
+            // Hitbox: exakt 16x16 über der Oberkante (deckungsgleich zur Grafik)
             const hitbox = this.add.rectangle(
               tileCenterX,
               groundTop - 8,
@@ -179,14 +216,12 @@ export default class LevelScene extends Phaser.Scene {
         }
       });
 
+      // KEIN this.platforms.refresh() hier, damit manuell gesetzte Body-Größen bestehen bleiben.
       this.time.delayedCall(0, () => this.buildVisiblePlatformsFromLines());
       this.time.delayedCall(1, () => this.spawnCoinsForPlatforms());
       // After building objects, refine spike placement for fairness/clarity
       this.refineSpikePlacement(objects);
 
-      // Ensure static physics bodies match their game object sizes/positions
-      // This prevents falling through floors and corrects hazard hitboxes
-      if (this.platforms?.refresh) this.platforms.refresh();
       if (this.hazards?.refresh) this.hazards.refresh();
       if (this.coins?.refresh) this.coins.refresh();
       if (this.goals?.refresh) this.goals.refresh();
@@ -208,10 +243,14 @@ export default class LevelScene extends Phaser.Scene {
       // Refit physics body to match scaled sprite size
       const dispW = this.player.displayWidth;
       const dispH = this.player.displayHeight;
-      const bodyW = Math.round(dispW * 0.5); // narrower than sprite for fair collisions
-      const bodyH = Math.round(dispH * 0.8); // leave a bit of headroom
+      const minBodyWidth = 8;
+      const minBodyHeight = 8;
+      const rawBodyW = Math.round(dispW - 100); // narrower than sprite for fair collisions
+      const rawBodyH = Math.round(dispH * 0.8); // leave a bit of headroom
+      const bodyW = Phaser.Math.Clamp(rawBodyW, minBodyWidth, Math.round(dispW));
+      const bodyH = Phaser.Math.Clamp(rawBodyH, minBodyHeight, Math.round(dispH));
       const offsetX = Math.round((dispW - bodyW) / 2);
-      const offsetY = Math.round(dispH - bodyH - 2); // small foot clearance
+      const offsetY = Math.round(dispH - bodyH - 10); // 0 px Fuß-Luft, um "schweben" zu vermeiden
 
       const unscaledW = bodyW / this.player.scaleX;
       const unscaledH = bodyH / this.player.scaleY;
@@ -229,7 +268,7 @@ export default class LevelScene extends Phaser.Scene {
         : this.findGroundSupportTop(objects, spawn.x, this.player.body.width);
       if (supportTop != null) {
         // Place so the bottom of the physics body sits on the ground
-        const desiredTop = Math.round(supportTop - this.player.body.height - 1);
+        const desiredTop = Math.round(supportTop - this.player.body.height - 10);
         const desiredSpriteY =
           desiredTop +
           this.player.displayHeight / 2 -
@@ -295,12 +334,10 @@ export default class LevelScene extends Phaser.Scene {
         this.score += UI.SCORE_PER_COIN;
         this.game.events.emit("score:add", UI.SCORE_PER_COIN, this.score);
         playBeep(this, 1046, 80, "square");
-        // Level ends when all coins are collected
-        const remaining = (this.coins.getChildren() || []).filter(
-          (c) => c.active
-        ).length;
-        if (remaining === 0) {
-          this.onLevelComplete();
+        // Track remaining coins and require the flag to finish
+        if (this.getRemainingActiveCoins() === 0) {
+          this.allCoinsCollected = true;
+          this.notifyUI("Alle Münzen eingesammelt! Zur Flagge gehen.", 2200);
         }
       });
 
@@ -308,7 +345,13 @@ export default class LevelScene extends Phaser.Scene {
         this.onPlayerDeath();
       });
 
-      // goal objects no longer used; completion via coins only
+      this.physics.add.overlap(
+        this.player,
+        this.goals,
+        this.handleGoalOverlap,
+        null,
+        this
+      );
 
       // Now that colliders are set and spawn is adjusted, enable gravity
       if (this.player.body?.setAllowGravity)
@@ -332,14 +375,11 @@ export default class LevelScene extends Phaser.Scene {
       // HUD / UI
       this.scene.run("UIScene", { score: this.score });
 
-      // Listen UI timer
-      // no timer/pause listeners
-
       playBeep(this, 700, 60, "triangle");
     } catch (err) {
       // Show a friendly in-game error message instead of a blank screen
       console.error("Level load error:", err);
-      const msg = "Fehler beim Laden des Levels. Dr++cke ESC f++r Men++.";
+      const msg = "Fehler beim Laden des Levels. Drücke ESC für Menü.";
       this.add
         .text(400, 220, msg, {
           fontSize: 18,
@@ -394,11 +434,13 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   onLevelComplete() {
+    if (this.isLevelComplete) return;
+    this.isLevelComplete = true;
     playBeep(this, 880, 120, "triangle");
     // Unlock next level and save highscore if improved
     const nextLevel = Math.min(this.levelId + 1, DEFAULTS.MAX_LEVELS);
     const progress = loadProgress();
-    const updated = saveProgress({
+    saveProgress({
       unlockedLevel: Math.max(progress.unlockedLevel, nextLevel),
       highScore: Math.max(progress.highScore, this.score),
     });
@@ -628,50 +670,20 @@ export default class LevelScene extends Phaser.Scene {
 
   createPlatformSurface({ x, y, width = 32, height = 16 }) {
     const top = y - height;
-    const centerX = x + width / 2;
-    const centerY = top + height / 2;
+    const left = Math.round(x);
+    const topPx = Math.round(top);
+    const widthPx = Math.max(1, Math.round(width));
+    const heightPx = Math.max(1, Math.round(height));
 
-    const collider = this.add.rectangle(
-      centerX,
-      centerY,
-      width,
-      height,
-      0xffffff,
-      0
-    );
+    const collider = this.add
+      .rectangle(left, topPx, widthPx, heightPx, 0xffffff, 0)
+      .setOrigin(0, 0);
     this.physics.add.existing(collider, true);
     if (collider.body?.updateFromGameObject)
       collider.body.updateFromGameObject();
     this.platforms.add(collider);
 
-    const left = Math.round(x);
-    const topPx = Math.round(top);
-    const widthPx = Math.max(1, Math.round(width));
-    const heightPx = Math.max(1, Math.round(height));
     const visuals = this.stampPlatformOnLine(left, topPx, widthPx, heightPx);
-
-    // >>> Hitbox an die sichtbare plattform.png angleichen <<<
-    if (visuals && visuals[0]) {
-      const v = visuals[0]; // das Sprite aus plattform.png
-      const vW = v.displayWidth; // aktuell 140
-      const vH = v.displayHeight; // aktuell 60
-      // Sprite hat Origin (0, 1): x = left, y = top (oben auf Linie)
-      const vCenterX = v.x + vW / 2; // centerX = left + width/2
-      const vCenterY = v.y - vH / 2; // centerY = top - height/2
-
-      // Collider exakt auf die Grafik zentrieren + Größe angleichen
-      collider.setPosition(vCenterX, vCenterY);
-      collider.width = vW;
-      collider.height = vH;
-
-      // Arcade-Static-Body aktualisieren
-      if (collider.body?.setSize) {
-        collider.body.setSize(vW, vH); // falls verfügbar
-      }
-      if (collider.body?.updateFromGameObject) {
-        collider.body.updateFromGameObject();
-      }
-    }
 
     const surfaceRecord = {
       left,
@@ -682,90 +694,93 @@ export default class LevelScene extends Phaser.Scene {
       collider,
       visuals,
     };
+
+    this.alignColliderToPlatformSprite(surfaceRecord);
     this.platformSurfaces.push(surfaceRecord);
   }
 
+  // >>> WICHTIG: Hitbox (Collider) exakt auf die Position & Breite der PNG legen,
+  // aber Oberkante leicht in die Grafik versetzen (SURFACE_INSET_TOP), damit der Spieler nicht schwebt.
+  alignColliderToPlatformSprite(surface) {
+    const collider = surface?.collider;
+    const sprite = surface?.visuals?.[0];
+    const body = collider?.body;
+    if (!collider || !sprite || !body) return;
+
+    // Aktuelle Sprite-Maße (die Hitbox soll grundsätzlich zum Sprite passen)
+    const spriteW = Math.round(sprite.displayWidth);
+    const spriteH = Math.round(sprite.displayHeight);
+
+    // --- ZUERST: Hitbox exakt an Sprite koppeln (ohne Position zu ändern) ---
+    // Hier KEIN collider.setPosition(...); wir verändern nicht die Welt-Position.
+    // Wir gehen davon aus: collider sitzt bereits am Sprite-TopLeft (oder wo du ihn platziert hast).
+    // Setze daher NUR Größe/Offset so, dass Body dem Sprite entspricht:
+    body.setSize(spriteW, spriteH, false);
+    // Falls dein collider-GameObject TopLeft-Origin hat und schon korrekt steht:
+    body.setOffset(body.offset?.x ?? 0, body.offset?.y ?? 0);
+    body.updateFromGameObject?.();
+
+    // --- DANN: links & rechts kürzen, OHNE die Position zu verändern ---
+    const TRIM = 0; // je Seite X Pixel kürzen
+    const newW = Math.max(4, spriteW - 2 * TRIM); // neue Breite
+    const keepCenterOffsetX = (spriteW - newW) / 2; // zentriert kürzen ⇒ Zentrum bleibt gleich
+
+    // Größe ändern, Offset so setzen, dass die Mitte identisch bleibt
+    body.setSize(newW, spriteH, false);
+    body.setOffset(
+      (body.offset?.x ?? 0) + keepCenterOffsetX,
+      body.offset?.y ?? 0
+    );
+    body.updateFromGameObject?.();
+
+
+  }
+
   buildVisiblePlatformsFromLines() {
-    if (!this.textures.exists("platform")) {
-      console.error("platform texture missing");
+    const textureKey = this.platformTextureKey ?? "platform";
+    if (!this.textures.exists(textureKey)) {
+      console.error(`${textureKey} texture missing`);
       return;
     }
 
     this.platformSurfaces.forEach((surface) => {
-      const { collider } = surface;
-      const body = collider?.body;
-      if (!body) return;
+      const left = Math.round(surface.left ?? 0);
+      const top = Math.round(surface.top ?? 0);
+      const widthPx = Math.max(1, Math.round(surface.width ?? 1));
+      const heightPx = Math.max(1, Math.round(surface.height ?? 1));
 
-      // 1) Body-Position lesen (aktueller Collider-Stand)
-      const left = Math.round(body.left);
-      const right = Math.round(body.right);
-      const top = Math.round(body.top);
-      const widthPx = Math.max(1, Math.round(right - left));
-
-      // 2) Surface-Geometrie updaten
-      surface.left = left;
-      surface.right = left + widthPx;
-      surface.width = widthPx;
-      surface.top = top;
-
-      // 3) Visuals erzeugen/positionieren (Sprite hat Origin (0,1) an (left, top))
+      // Visuals erzeugen/positionieren (Sprite hat Origin (0,1) an (left, top))
       if (!surface.visuals?.length) {
         surface.visuals = this.stampPlatformOnLine(
           left,
           top,
           widthPx,
-          surface.height
+          heightPx
         );
       } else {
-        this.positionPlatformVisuals(
-          surface,
-          left,
-          top,
-          widthPx,
-          surface.height
-        );
+        this.positionPlatformVisuals(surface, left, top, widthPx, heightPx);
       }
 
-      // 4) >>> Hitbox an die sichtbare plattform.png angleichen <<<
-      const v = surface.visuals?.[0];
-      if (v) {
-        const vW = v.displayWidth;
-        const vH = v.displayHeight;
-        const vCenterX = v.x + vW / 2; // weil Origin (0,1)
-        const vCenterY = v.y - vH / 2;
-
-        collider.setPosition(vCenterX, vCenterY);
-        // diese beiden ändern nur das Display-Rechteck des Rectangle-GameObjects,
-        // die Arcade-Hitbox stellst du mit body.setSize ein:
-        collider.width = vW;
-        collider.height = vH;
-
-        if (collider.body?.setSize) {
-          collider.body.setSize(vW, vH); // eigentliche Hitbox-Größe
-          collider.body.updateFromGameObject?.(); // statischen Body neu berechnen
-        }
-
-        // 5) Optional: surface-Koordinaten an die (neue) Body-Lage anpassen
-        surface.left = Math.round(collider.body.left);
-        surface.right = Math.round(collider.body.right);
-        surface.top = Math.round(collider.body.top);
-        surface.width = Math.round(collider.body.right - collider.body.left);
-      }
+      // Danach Collider exakt an Sprite anlegen
+      this.alignColliderToPlatformSprite(surface);
     });
   }
 
   stampPlatformOnLine(left, top, widthPx, heightPx = 16) {
-    const source = this.textures.get("platform")?.getSourceImage?.();
+    const textureKey = this.platformTextureKey ?? "platform";
+    const source = this.textures.get(textureKey)?.getSourceImage?.();
     if (!source) {
-      console.error("platform texture missing");
+      console.error(`${textureKey} texture missing`);
       return [];
     }
+    const { width, height } = this.platformDisplaySize ?? {
+      width: 140,
+      height: 60,
+    };
     const lineLeft = Math.round(left);
     const lineTop = Math.round(top + PLATFORM_Y_OFFSET);
-    const width = 140;
-    const height = 60;
     const sprite = this.add
-      .image(lineLeft, lineTop, "platform")
+      .image(lineLeft, lineTop, textureKey)
       .setOrigin(0, 1)
       .setDepth(20)
       .setScrollFactor(1)
@@ -777,8 +792,10 @@ export default class LevelScene extends Phaser.Scene {
   }
 
   positionPlatformVisuals(surface, left, top, widthPx, heightPx = 16) {
-    const width = 140;
-    const height = 60;
+    const { width, height } = this.platformDisplaySize ?? {
+      width: 140,
+      height: 60,
+    };
     const posX = Math.round(left);
     const posY = Math.round(top + PLATFORM_Y_OFFSET);
     (surface.visuals || []).forEach((sprite) => {
@@ -810,7 +827,7 @@ export default class LevelScene extends Phaser.Scene {
           .setDepth(40)
           .setVisible(true);
         const coinHeight = coin.displayHeight || coin.height || baseCoinHeight;
-        coin.setY(surface.top - coinHeight * 0.5);
+        coin.setY(surface.top - coinHeight * 0.5 - 30);
         if (coin.body?.updateFromGameObject) coin.body.updateFromGameObject();
         this.coinLayer?.add?.(coin);
         this.coins.add(coin);
@@ -908,5 +925,101 @@ export default class LevelScene extends Phaser.Scene {
     const candidates = [a, b, c].filter((v) => v != null);
     if (!candidates.length) return null;
     return Math.min(...candidates);
+  }
+
+  getPlatformDisplaySize() {
+    const defaultSize = { width: 140, height: 60 };
+    if (this.levelId === 2) {
+      return { width: 112, height: 48 };
+    }
+    if (this.levelId === 3) {
+      return { width: 120, height: 52 };
+    }
+    return defaultSize;
+  }
+
+  getPlatformTextureKey() {
+    const levelSpecific = {
+      2: "platform_snow",
+      3: "platform_desert",
+    };
+    const preferred = levelSpecific[this.levelId];
+    if (preferred && this.textures.exists(preferred)) {
+      return preferred;
+    }
+    if (this.textures.exists("platform")) {
+      return "platform";
+    }
+    if (this.textures.exists("platform_snow")) {
+      return "platform_snow";
+    }
+    if (this.textures.exists("platform_desert")) {
+      return "platform_desert";
+    }
+    return preferred || "platform";
+  }
+
+  getStageTextureKey() {
+    const levelSpecific = {
+      2: "stage_snow",
+      3: "stage_desert",
+    };
+    const preferred = levelSpecific[this.levelId];
+    if (preferred && this.textures.exists(preferred)) {
+      return preferred;
+    }
+    if (this.textures.exists("stage")) {
+      return "stage";
+    }
+    return preferred || "stage";
+  }
+
+  getStageVisualConfig() {
+    const key = this.getStageTextureKey();
+    const overrides = {
+      stage_snow: { height: 64 },
+    };
+    return {
+      key,
+      ...(overrides[key] || {}),
+    };
+  }
+
+  getBackgroundTextureKey() {
+    const levelSpecific = {
+      2: "level_bg_snow",
+      3: "level_bg_desert",
+    };
+    const preferred = levelSpecific[this.levelId];
+    if (preferred && this.textures.exists(preferred)) {
+      return preferred;
+    }
+    if (this.textures.exists("level_bg")) {
+      return "level_bg";
+    }
+    // Fall back to any other loaded background so we never render a blank screen.
+    if (this.textures.exists("level_bg_desert")) return "level_bg_desert";
+    if (this.textures.exists("level_bg_snow")) return "level_bg_snow";
+    return preferred || "level_bg";
+  }
+
+  handleGoalOverlap() {
+    if (!this.allCoinsCollected && this.getRemainingActiveCoins() > 0) {
+      if (this.time.now >= this.goalWarningCooldown) {
+        this.goalWarningCooldown = this.time.now + 1500;
+        this.notifyUI("Es müssen alle Münzen eingesammelt werden", 2000);
+        playBeep(this, 300, 120, "sawtooth");
+      }
+      return;
+    }
+    this.onLevelComplete();
+  }
+
+  getRemainingActiveCoins() {
+    return (this.coins?.getChildren?.() || []).filter((c) => c.active).length;
+  }
+
+  notifyUI(message, duration = 2000) {
+    this.game?.events?.emit("ui:notify", message, duration);
   }
 }

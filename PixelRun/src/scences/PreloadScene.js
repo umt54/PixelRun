@@ -8,15 +8,27 @@ export default class PreloadScene extends Phaser.Scene {
 
   preload() {
     // Load external character assets and generate fallback textures for other items.
-    // Level background image
+    // Level background images
     const bgUrl = new URL('../background/background.png', import.meta.url).href;
     this.load.image('level_bg', bgUrl);
-    // Platform image for jumpable platforms
+    const snowBgUrl = new URL('../background/snow-background.png', import.meta.url).href;
+    this.load.image('level_bg_snow', snowBgUrl);
+    const desertBgUrl = new URL('../background/desert-background.png', import.meta.url).href;
+    this.load.image('level_bg_desert', desertBgUrl);
+    // Platform images for jumpable platforms
     const platUrl = new URL('../elements/plattform.png', import.meta.url).href;
     this.load.image('platform', platUrl);
+    const snowPlatUrl = new URL('../elements/snow-plattform.png', import.meta.url).href;
+    this.load.image('platform_snow', snowPlatUrl);
+    const desertPlatUrl = new URL('../elements/desert-plattform.png', import.meta.url).href;
+    this.load.image('platform_desert', desertPlatUrl);
     // Walkable stage image
     const stageUrl = new URL('../elements/stage.png', import.meta.url).href;
     this.load.image('stage', stageUrl);
+    const stageSnowUrl = new URL('../elements/snow-stage.png', import.meta.url).href;
+    this.load.image('stage_snow', stageSnowUrl);
+    const stageDesertUrl = new URL('../elements/desert-stage.png', import.meta.url).href;
+    this.load.image('stage_desert', stageDesertUrl);
     this.loadCharacterAssets();
     this.createGeneratedTextures();
   }
