@@ -29,7 +29,8 @@ export default class UIScene extends Phaser.Scene {
     this.syncCoinTotalsFromLevel();
 
     // Simple hint (no pause/time shown)
-    const hint = this.add.text(400, 460, `Mute: ${CONTROLS.MUTE_TOGGLE_KEY}`, { fontSize: 12, color: '#A0A8BD' }).setOrigin(0.5, 1);
+    const hintText = `Mute: ${CONTROLS.MUTE_TOGGLE_KEY}   Pause: ESC/${CONTROLS.PAUSE_TOGGLE_KEY}`;
+    const hint = this.add.text(400, 460, hintText, { fontSize: 12, color: '#A0A8BD' }).setOrigin(0.5, 1);
     hint.setDepth(1000);
 
     this.noticeText = this.add.text(400, 80, '', { fontSize: 16, color: '#FFECAA', backgroundColor: 'rgba(20,20,20,0.6)', padding: { x: 12, y: 6 } })
@@ -58,7 +59,7 @@ export default class UIScene extends Phaser.Scene {
   formatCoinText() {
     const { collected = 0, remaining = 0, total = 0 } = this.coinTotals || {};
     const clampedRemaining = Math.max(remaining, 0);
-    return `Muenzen: ${collected}/${total} (Rest: ${clampedRemaining})`;
+    return `Münzen: ${collected}/${total} (Rest: ${clampedRemaining})`;
   }
 
   syncCoinTotalsFromLevel() {

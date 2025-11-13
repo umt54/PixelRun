@@ -36,6 +36,12 @@ export default class LevelScene extends Phaser.Scene {
     this.levelCoinTotal = 0;
     this.levelCoinsCollected = 0;
     this.coinProgressRetryTimer = null;
+    this.pauseMenu = null;
+    this.pauseMenuButtons = { resume: null, quit: null };
+    this.isPauseMenuVisible = false;
+    this.pauseHotkeyHandler = null;
+    this.wasPhysicsPausedBeforeMenu = false;
+    this.pauseMenuUiWasActive = false;
   }
 
   init(data) {
@@ -44,6 +50,12 @@ export default class LevelScene extends Phaser.Scene {
     this.levelCoinTotal = 0;
     this.levelCoinsCollected = 0;
     this.coinProgressRetryTimer = null;
+    this.isPauseMenuVisible = false;
+    this.pauseMenu = null;
+    this.pauseMenuButtons = { resume: null, quit: null };
+    this.pauseHotkeyHandler = null;
+    this.wasPhysicsPausedBeforeMenu = false;
+    this.pauseMenuUiWasActive = false;
   }
 
   preload() {
@@ -395,6 +407,9 @@ export default class LevelScene extends Phaser.Scene {
         },
       });
 
+      this.ensurePauseMenu();
+      this.registerPauseHotkeys();
+
       playBeep(this, 700, 60, "triangle");
     } catch (err) {
       // Show a friendly in-game error message instead of a blank screen
@@ -446,6 +461,8 @@ export default class LevelScene extends Phaser.Scene {
 
   shutdown() {
     this.clearCoinProgressRetryTimer();
+    this.removePauseHotkeys();
+    this.destroyPauseMenu();
   }
 
   onPlayerDeath() {
@@ -488,7 +505,171 @@ export default class LevelScene extends Phaser.Scene {
     }
   }
 
-  togglePause() {}
+  togglePause(showMenu = !this.isPauseMenuVisible) {
+    if (showMenu) {
+      if (this.isPauseMenuVisible) return;
+      this.ensurePauseMenu();
+      this.pauseMenu.setVisible(true);
+      this.setPauseMenuInteraction(true);
+      this.wasPhysicsPausedBeforeMenu = this.physics.world.isPaused;
+      if (!this.wasPhysicsPausedBeforeMenu) {
+        this.physics.world.pause();
+      }
+      this.pauseMenuUiWasActive = !!this.scene?.isActive?.("UIScene");
+      if (this.pauseMenuUiWasActive) {
+        this.scene.pause("UIScene");
+        this.scene.setVisible?.("UIScene", false);
+      }
+      this.isPauseMenuVisible = true;
+      playBeep(this, 320, 90, "triangle");
+      return;
+    }
+
+    if (!this.isPauseMenuVisible) return;
+    this.pauseMenu.setVisible(false);
+    this.setPauseMenuInteraction(false);
+    if (!this.wasPhysicsPausedBeforeMenu) {
+      this.physics.world.resume();
+    }
+    if (this.pauseMenuUiWasActive) {
+      this.scene.resume("UIScene");
+      this.scene.setVisible?.("UIScene", true);
+    }
+    this.wasPhysicsPausedBeforeMenu = false;
+    this.pauseMenuUiWasActive = false;
+    this.isPauseMenuVisible = false;
+    playBeep(this, 520, 70, "triangle");
+  }
+
+  ensurePauseMenu() {
+    if (this.pauseMenu) return;
+    const width = this.scale?.width ?? 800;
+    const height = this.scale?.height ?? 480;
+    const container = this.add.container(0, 0);
+    container.setDepth(5000);
+    container.setScrollFactor?.(0);
+    container.setVisible(false);
+
+    const overlay = this.add
+      .rectangle(0, 0, width, height, 0x050915, 0.72)
+      .setOrigin(0, 0);
+    overlay.setInteractive({ useHandCursor: false });
+    overlay.setScrollFactor?.(0);
+
+    const panelWidth = Math.min(420, width - 80);
+    const panel = this.add
+      .rectangle(width / 2, height / 2, panelWidth, 220, 0x1c2340, 0.95)
+      .setOrigin(0.5)
+      .setStrokeStyle(2, 0x4aa3ff, 0.85);
+    panel.setScrollFactor?.(0);
+
+    const title = this.add
+      .text(width / 2, height / 2 - 80, "Pause", {
+        fontSize: 32,
+        color: "#E7F0FF",
+      })
+      .setOrigin(0.5);
+    title.setScrollFactor?.(0);
+
+    const resumeBtn = this.createPauseButton(
+      width / 2,
+      height / 2 - 10,
+      "Spiel fortsetzen",
+      () => this.togglePause(false)
+    );
+    const menuBtn = this.createPauseButton(
+      width / 2,
+      height / 2 + 50,
+      "Zurück zum Hauptmenü",
+      () => this.exitToMainMenu()
+    );
+
+    container.add([overlay, panel, title, resumeBtn, menuBtn]);
+    this.pauseMenu = container;
+    this.pauseMenuButtons = { resume: resumeBtn, quit: menuBtn };
+    this.setPauseMenuInteraction(false);
+  }
+
+  createPauseButton(x, y, label, callback) {
+    const button = this.add
+      .text(x, y, label, {
+        fontSize: 22,
+        color: "#E7F0FF",
+        backgroundColor: "#1f2942",
+        padding: { x: 18, y: 8 },
+      })
+      .setOrigin(0.5);
+    button.setScrollFactor?.(0);
+    button.on("pointerover", () => button.setStyle({ color: "#7cceff" }));
+    button.on("pointerout", () => button.setStyle({ color: "#E7F0FF" }));
+    button.on("pointerup", () => callback?.());
+    return button;
+  }
+
+  setPauseMenuInteraction(enabled) {
+    const buttons = [
+      this.pauseMenuButtons?.resume,
+      this.pauseMenuButtons?.quit,
+    ].filter(Boolean);
+    buttons.forEach((btn) => {
+      if (enabled) {
+        btn.setInteractive({ useHandCursor: true });
+      } else if (btn.disableInteractive && btn.input) {
+        btn.disableInteractive();
+      }
+    });
+  }
+
+  registerPauseHotkeys() {
+    if (!this.input?.keyboard) return;
+    this.removePauseHotkeys();
+    this.pauseHotkeyHandler = (event) => {
+      if (event?.repeat) return;
+      event?.preventDefault?.();
+      if (this.isPauseMenuVisible) {
+        this.togglePause(false);
+        return;
+      }
+      if (this.isLevelComplete) return;
+      this.togglePause(true);
+    };
+    this.input.keyboard.on("keydown-ESC", this.pauseHotkeyHandler);
+    if (CONTROLS.PAUSE_TOGGLE_KEY) {
+      this.input.keyboard.on(
+        `keydown-${CONTROLS.PAUSE_TOGGLE_KEY}`,
+        this.pauseHotkeyHandler
+      );
+    }
+  }
+
+  removePauseHotkeys() {
+    if (!this.pauseHotkeyHandler || !this.input?.keyboard) return;
+    this.input.keyboard.off("keydown-ESC", this.pauseHotkeyHandler);
+    if (CONTROLS.PAUSE_TOGGLE_KEY) {
+      this.input.keyboard.off(
+        `keydown-${CONTROLS.PAUSE_TOGGLE_KEY}`,
+        this.pauseHotkeyHandler
+      );
+    }
+    this.pauseHotkeyHandler = null;
+  }
+
+  exitToMainMenu() {
+    this.togglePause(false);
+    this.scene.stop("UIScene");
+    this.scene.start("MainMenuScene");
+  }
+
+  destroyPauseMenu() {
+    if (this.pauseMenu) {
+      this.pauseMenu.destroy(true);
+    }
+    this.pauseMenu = null;
+    this.pauseMenuButtons = { resume: null, quit: null };
+    this.isPauseMenuVisible = false;
+    this.pauseMenuUiWasActive = false;
+    this.wasPhysicsPausedBeforeMenu = false;
+  }
 
   respawnPlayer() {
     const p = this.spawnPoint || { x: 64, y: 400 };
