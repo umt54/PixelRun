@@ -84,6 +84,23 @@ export default class LevelScene extends Phaser.Scene {
       ).href;
       this.load.image("platform_desert", desertPlatUrl);
     }
+    // Load optional new element assets (SVG placeholders)
+    if (!this.textures.exists("moving_platform")) {
+      const mp = new URL("../elements/moving-platform.svg", import.meta.url).href;
+      this.load.image("moving_platform", mp);
+    }
+    if (!this.textures.exists("jump_pad")) {
+      const jp = new URL("../elements/jump-pad.svg", import.meta.url).href;
+      this.load.image("jump_pad", jp);
+    }
+    if (!this.textures.exists("falling_platform")) {
+      const fp = new URL("../elements/falling-platform.svg", import.meta.url).href;
+      this.load.image("falling_platform", fp);
+    }
+    if (!this.textures.exists("saw")) {
+      const sw = new URL("../elements/saw.svg", import.meta.url).href;
+      this.load.image("saw", sw);
+    }
   }
 
   create() {
@@ -133,12 +150,18 @@ export default class LevelScene extends Phaser.Scene {
       this.initializeRenderLayers();
       this.resetPlatformVisuals(true);
       this.logLayerDepths();
+      // Ensure simple pixel-style textures exist for prototype visuals
+      this.createPixelTextures();
 
       // Groups
-      this.platforms = this.physics.add.staticGroup();
+      // Use a generic group for platforms so moving/falling platforms can be dynamic
+      this.platforms = this.physics.add.group();
       this.hazards = this.physics.add.staticGroup();
       this.coins = this.physics.add.staticGroup();
       this.goals = this.physics.add.staticGroup();
+      // Special groups for interactive objects created before player exists
+      this.jumpPads = this.physics.add.staticGroup();
+      this.fallingPlatforms = this.physics.add.group();
 
       // Determine base stage ground (lowest ground rect) and add visible stage image
       this.stageRect = objects
@@ -231,6 +254,99 @@ export default class LevelScene extends Phaser.Scene {
           const flag = this.add.image(x + 8, y - 10, "flag");
           this.physics.add.existing(flag, true);
           this.goals.add(flag);
+        } else if (type === "movingPlatform") {
+          // movingPlatform: supports properties.range (pixels), properties.axis ('x'|'y'), properties.speed (px/s)
+          const props = (obj.properties || []).reduce((acc, p) => ({ ...acc, [p.name]: p.value }), {});
+          const range = Number(props.range || 200);
+          const axis = String(props.axis || "x");
+          const speed = Number(props.speed || 80);
+
+          const centerX = x + (width || 140) / 2;
+          const centerY = y - (height || 16) / 2;
+          const tex = this.textures.exists("moving_platform")
+            ? "moving_platform"
+            : this.textures.exists("moving_platform_px")
+            ? "moving_platform_px"
+            : this.getPlatformTextureKey();
+          const plat = this.physics.add.image(centerX, centerY + PLATFORM_Y_OFFSET, tex).setOrigin(0.5, 1);
+          const dispW = this.platformDisplaySize?.width || 140;
+          const dispH = this.platformDisplaySize?.height || 60;
+          plat.setDisplaySize(dispW, dispH);
+          if (plat.body) {
+            plat.body.setAllowGravity(false);
+            plat.body.setImmovable(true);
+          }
+          plat.setDepth(20);
+          this.platformLayer.add(plat);
+          this.platforms.add(plat);
+
+          const to = {};
+          to[axis] = axis === "x" ? plat.x + range : plat.y - range;
+          const dur = Math.max(200, (range / Math.max(1, speed)) * 1000);
+          this.tweens.add({
+            targets: plat,
+            ...to,
+            ease: "Sine.easeInOut",
+            yoyo: true,
+            repeat: -1,
+            duration: dur,
+            onUpdate: () => {
+              if (plat.body?.updateFromGameObject) plat.body.updateFromGameObject();
+            },
+          });
+        } else if (type === "jumpPad") {
+          // jumpPad: create visual and add to jumpPads group. Overlap is set after player creation.
+          const padW = width || 48;
+          const padH = height || 12;
+          const padTex = this.textures.exists("jump_pad")
+            ? "jump_pad"
+            : this.textures.exists("jump_pad_px")
+            ? "jump_pad_px"
+            : null;
+          const pad = padTex
+            ? this.add.image(x + padW / 2, y - padH / 2 + PLATFORM_Y_OFFSET, padTex).setOrigin(0.5, 1)
+            : this.add.rectangle(x + padW / 2, y - padH / 2 + PLATFORM_Y_OFFSET, padW, padH, 0x4ad64a, 1).setOrigin(0.5, 1);
+          pad.setDisplaySize(padW, padH);
+          pad.setDepth(30);
+          this.platformLayer.add(pad);
+          this.jumpPads.add(pad);
+          this.physics.add.existing(pad, true);
+        } else if (type === "saw") {
+          // saw: rotating hazard
+          const radius = Math.max(8, (width || 32) / 2);
+          const saw = this.add.circle(x + radius, y - radius + PLATFORM_Y_OFFSET, radius, 0xcc3333).setDepth(25);
+          // Prefer image if available, otherwise draw circle
+          if (this.textures.exists("saw") || this.textures.exists("saw_px")) {
+            const key = this.textures.exists("saw") ? "saw" : "saw_px";
+            const img = this.add.image(x + radius, y - radius + PLATFORM_Y_OFFSET, key).setDepth(25).setOrigin(0.5, 0.5);
+            this.physics.add.existing(img, true);
+            if (img.body && img.body.setCircle) img.body.setCircle(radius).setOffset(-radius, -radius);
+            this.hazards.add(img);
+            this.tweens.add({ targets: img, angle: 360, duration: 1000, repeat: -1, ease: 'Linear' });
+          } else {
+            this.physics.add.existing(saw, true);
+            if (saw.body && saw.body.setCircle) saw.body.setCircle(radius).setOffset(-radius, -radius);
+            this.hazards.add(saw);
+            this.tweens.add({ targets: saw, angle: 360, duration: 1000, repeat: -1, ease: 'Linear' });
+          }
+        } else if (type === "fallingPlatform") {
+          // Falling platform: initially immovable and gravity-disabled; when player steps, it falls
+          const centerX = x + (width || 140) / 2;
+          const centerY = y - (height || 16) / 2 + PLATFORM_Y_OFFSET;
+          const tex = this.textures.exists("falling_platform") ? "falling_platform" : this.getPlatformTextureKey();
+          const plat = this.physics.add.image(centerX, centerY, tex).setOrigin(0.5, 1);
+          const dispW = Math.max(24, Math.round(width || this.platformDisplaySize?.width || 140));
+          const dispH = Math.max(8, Math.round(height || this.platformDisplaySize?.height || 60));
+          plat.setDisplaySize(dispW, dispH);
+          plat.setDepth(20);
+          if (plat.body) {
+            plat.body.setAllowGravity(false);
+            plat.body.setImmovable(true);
+          }
+          plat._willFall = false;
+          this.platformLayer.add(plat);
+          this.platforms.add(plat);
+          this.fallingPlatforms.add(plat);
         }
       });
 
@@ -346,6 +462,46 @@ export default class LevelScene extends Phaser.Scene {
 
       // Physics
       this.physics.add.collider(this.player, this.platforms);
+
+      // Jump pads: give upward impulse when player overlaps from above
+      if (this.jumpPads?.getChildren?.().length) {
+        this.physics.add.overlap(this.player, this.jumpPads, (player, pad) => {
+          if (player.body.velocity.y >= 0) {
+            player.setVelocityY(PHYSICS.PLAYER.JUMP_SPEED * 1.35);
+            playBeep(this, 880, 80, "sine");
+          }
+        });
+      }
+
+      // Falling platforms: when player stands on them, release after a short delay
+      if (this.fallingPlatforms?.getChildren?.().length) {
+        this.physics.add.collider(this.player, this.fallingPlatforms, (player, plat) => {
+          if (!plat._willFall) {
+            plat._willFall = true;
+            // visual warning: tint + small flash
+            try {
+              if (plat.setTint) plat.setTint(0xff6666);
+              this.tweens.add({ targets: plat, alpha: 0.6, yoyo: true, repeat: 3, duration: 80 });
+            } catch (e) {}
+            playBeep(this, 240, 120, "sawtooth");
+            this.time.delayedCall(350, () => {
+              if (plat.body) {
+                if (plat.body.setImmovable) plat.body.setImmovable(false);
+                if (plat.body.setAllowGravity) plat.body.setAllowGravity(true);
+                if (plat.setVelocityY) plat.setVelocityY(30);
+              }
+              // clear tint so it looks natural while falling
+              try {
+                if (plat.clearTint) plat.clearTint();
+              } catch (e) {}
+              // destroy after some time to clean up
+              this.time.delayedCall(2500, () => {
+                if (plat && plat.destroy) plat.destroy();
+              });
+            });
+          }
+        });
+      }
 
       this.physics.add.overlap(this.player, this.coins, (player, coin) => {
         if (!coin?.active) return;
@@ -1149,6 +1305,69 @@ export default class LevelScene extends Phaser.Scene {
       return { width: 120, height: 52 };
     }
     return defaultSize;
+  }
+
+  // Create small pixel-style fallback textures at runtime if image files are missing
+  createPixelTextures() {
+    try {
+      // moving platform (140x20)
+      if (!this.textures.exists("moving_platform_px")) {
+        const w = 140,
+          h = 20;
+        const g = this.make.graphics({ x: 0, y: 0, add: false });
+        g.fillStyle(0x2b6bb0, 1);
+        g.fillRect(0, 0, w, h);
+        g.fillStyle(0xcfe3ff, 1);
+        g.fillRect(4, 4, w - 8, h - 8);
+        g.generateTexture("moving_platform_px", w, h);
+        g.clear();
+      }
+
+      // jump pad (64x16)
+      if (!this.textures.exists("jump_pad_px")) {
+        const w = 64,
+          h = 16;
+        const g = this.make.graphics({ x: 0, y: 0, add: false });
+        g.fillStyle(0x2f8f2f, 1);
+        g.fillRect(0, 0, w, h);
+        g.fillStyle(0x4ad64a, 1);
+        g.fillRect(4, 4, w - 8, h - 8);
+        g.generateTexture("jump_pad_px", w, h);
+        g.clear();
+      }
+
+      // falling platform (120x28)
+      if (!this.textures.exists("falling_platform_px")) {
+        const w = 120,
+          h = 28;
+        const g = this.make.graphics({ x: 0, y: 0, add: false });
+        g.fillStyle(0xc68a2b, 1);
+        g.fillRect(0, 0, w, h);
+        g.fillStyle(0xfff0d9, 1);
+        g.fillRect(6, 6, w - 12, h - 12);
+        g.generateTexture("falling_platform_px", w, h);
+        g.clear();
+      }
+
+      // saw (32x32)
+      if (!this.textures.exists("saw_px")) {
+        const w = 32,
+          h = 32;
+        const g = this.make.graphics({ x: 0, y: 0, add: false });
+        g.fillStyle(0xcc3333, 1);
+        g.fillCircle(w / 2, h / 2, Math.floor(w / 2 - 2));
+        // teeth: simple white triangles
+        g.fillStyle(0xffffff, 1);
+        g.fillTriangle(w / 2, 2, w - 4, 10, w / 2, 12);
+        g.fillTriangle(w - 2, h / 2, w - 12, h - 4, w - 4, h / 2);
+        g.fillTriangle(w / 2, h - 2, w / 2 + 8, h - 12, w / 2 - 8, h - 12);
+        g.generateTexture("saw_px", w, h);
+        g.clear();
+      }
+    } catch (e) {
+      // Don't crash if texture generation fails
+      console.warn("createPixelTextures failed:", e);
+    }
   }
 
   getPlatformTextureKey() {

@@ -2,6 +2,7 @@
   "levels": [
     { "id": 1, "name": "Grüner Anfang", "map": "level1.json", "timeLimit": 120 },
     { "id": 2, "name": "Eisige Ruhe", "map": "level2.json", "timeLimit": 120 },
-    { "id": 3, "name": "Sandpfad", "map": "level3.json", "timeLimit": 130 }
+    { "id": 3, "name": "Sandpfad", "map": "level3.json", "timeLimit": 130 },
+    { "id": 4, "name": "Maschinenfabrik", "map": "level4.json", "timeLimit": 150 }
   ]
 }
