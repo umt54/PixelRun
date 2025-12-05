@@ -30,6 +30,7 @@ export default class PreloadScene extends Phaser.Scene {
     const stageDesertUrl = new URL('../elements/desert-stage.png', import.meta.url).href;
     this.load.image('stage_desert', stageDesertUrl);
     this.loadCharacterAssets();
+    this.loadSecondCharacterAssets();
     this.createGeneratedTextures();
   }
 
@@ -38,6 +39,7 @@ export default class PreloadScene extends Phaser.Scene {
     playBeep(this, 660, 60, 'triangle');
     // Prepare global animations using the loaded character assets
     this.createCharacterAnimations();
+    this.createSecondCharacterAnimations();
     this.scene.start('MainMenuScene');
   }
 
@@ -126,6 +128,46 @@ export default class PreloadScene extends Phaser.Scene {
     }
   }
 
+  loadSecondCharacterAssets() {
+    const base = (p) => new URL(`../character2/${p}`, import.meta.url).href;
+    this.load.image('char2_rot_n', base('rotations/north.png'));
+    this.load.image('char2_rot_ne', base('rotations/north-east.png'));
+    this.load.image('char2_rot_e', base('rotations/east.png'));
+    this.load.image('char2_rot_se', base('rotations/south-east.png'));
+    this.load.image('char2_rot_s', base('rotations/south.png'));
+    this.load.image('char2_rot_sw', base('rotations/south-west.png'));
+    this.load.image('char2_rot_w', base('rotations/west.png'));
+    this.load.image('char2_rot_nw', base('rotations/north-west.png'));
+    this.load.image('char2_idle', base('rotations/east.png'));
+    this.load.image('char2_jump', base('rotations/north-east.png'));
+
+    // Run frames
+    this.load.image('char2_run_0', base('animations/running-4-frames/east/frame_000.png'));
+    this.load.image('char2_run_1', base('animations/running-4-frames/east/frame_001.png'));
+    this.load.image('char2_run_2', base('animations/running-4-frames/east/frame_002.png'));
+    this.load.image('char2_run_3', base('animations/running-4-frames/east/frame_003.png'));
+    this.load.image('char2_run_w_0', base('animations/running-4-frames/west/frame_000.png'));
+    this.load.image('char2_run_w_1', base('animations/running-4-frames/west/frame_001.png'));
+    this.load.image('char2_run_w_2', base('animations/running-4-frames/west/frame_002.png'));
+    this.load.image('char2_run_w_3', base('animations/running-4-frames/west/frame_003.png'));
+
+    // Idle and jump loops
+    for (let i = 0; i <= 8; i++) {
+      const n = String(i).padStart(3, '0');
+      this.load.image(`char2_idle_e_${i}`, base(`animations/jumping-1/east/frame_${n}.png`));
+      this.load.image(`char2_idle_w_${i}`, base(`animations/jumping-1/west/frame_${n}.png`));
+      this.load.image(`char2_jump_e_${i}`, base(`animations/jumping-1/east/frame_${n}.png`));
+      this.load.image(`char2_jump_w_${i}`, base(`animations/jumping-1/west/frame_${n}.png`));
+    }
+
+    // Running jump frames
+    for (let i = 0; i <= 7; i++) {
+      const n = String(i).padStart(3, '0');
+      this.load.image(`char2_runjump_e_${i}`, base(`animations/running-jump/east/frame_${n}.png`));
+      this.load.image(`char2_runjump_w_${i}`, base(`animations/running-jump/west/frame_${n}.png`));
+    }
+  }
+
   createCharacterAnimations() {
     // Create or replace the standard animation keys used by LevelScene
     if (!this.anims.exists('run_east')) {
@@ -208,5 +250,84 @@ export default class PreloadScene extends Phaser.Scene {
     // Back-compat single-frame keys
     if (!this.anims.exists('idle')) this.anims.create({ key: 'idle', frames: [{ key: 'char_idle' }], frameRate: 1 });
     if (!this.anims.exists('jump')) this.anims.create({ key: 'jump', frames: [{ key: 'char_jump' }], frameRate: 1 });
+  }
+
+  createSecondCharacterAnimations() {
+    if (!this.anims.exists('char2_run_east')) {
+      this.anims.create({
+        key: 'char2_run_east',
+        frames: [
+          { key: 'char2_run_0' },
+          { key: 'char2_run_1' },
+          { key: 'char2_run_2' },
+          { key: 'char2_run_3' }
+        ],
+        frameRate: 10,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_run_west')) {
+      this.anims.create({
+        key: 'char2_run_west',
+        frames: [
+          { key: 'char2_run_w_0' },
+          { key: 'char2_run_w_1' },
+          { key: 'char2_run_w_2' },
+          { key: 'char2_run_w_3' }
+        ],
+        frameRate: 10,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_idle_east')) {
+      this.anims.create({
+        key: 'char2_idle_east',
+        frames: Array.from({ length: 9 }, (_, i) => ({ key: `char2_idle_e_${i}` })),
+        frameRate: 10,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_idle_west')) {
+      this.anims.create({
+        key: 'char2_idle_west',
+        frames: Array.from({ length: 9 }, (_, i) => ({ key: `char2_idle_w_${i}` })),
+        frameRate: 10,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_jump_east')) {
+      this.anims.create({
+        key: 'char2_jump_east',
+        frames: Array.from({ length: 9 }, (_, i) => ({ key: `char2_jump_e_${i}` })),
+        frameRate: 12,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_jump_west')) {
+      this.anims.create({
+        key: 'char2_jump_west',
+        frames: Array.from({ length: 9 }, (_, i) => ({ key: `char2_jump_w_${i}` })),
+        frameRate: 12,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_run_jump_east')) {
+      this.anims.create({
+        key: 'char2_run_jump_east',
+        frames: Array.from({ length: 8 }, (_, i) => ({ key: `char2_runjump_e_${i}` })),
+        frameRate: 14,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_run_jump_west')) {
+      this.anims.create({
+        key: 'char2_run_jump_west',
+        frames: Array.from({ length: 8 }, (_, i) => ({ key: `char2_runjump_w_${i}` })),
+        frameRate: 14,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('char2_idle')) this.anims.create({ key: 'char2_idle', frames: [{ key: 'char2_idle' }], frameRate: 1 });
+    if (!this.anims.exists('char2_jump')) this.anims.create({ key: 'char2_jump', frames: [{ key: 'char2_jump' }], frameRate: 1 });
   }
 }

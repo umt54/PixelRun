@@ -11,6 +11,7 @@ export default class GameOverScene extends Phaser.Scene {
     this.score = data.score || 0;
     this.reason = data.reason || 'dead';
     this.final = Boolean(data.final);
+    this.playerCount = data.playerCount ?? 1;
   }
 
   create() {
@@ -44,6 +45,6 @@ export default class GameOverScene extends Phaser.Scene {
   }
 
   retry() {
-    this.scene.start('LevelScene', { levelId: this.levelId, scoreCarry: 0 });
+    this.scene.start('LevelScene', { levelId: this.levelId, scoreCarry: 0, playerCount: this.playerCount });
   }
 }

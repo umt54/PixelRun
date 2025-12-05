@@ -14,15 +14,10 @@ export default class LevelScene extends Phaser.Scene {
     this.score = 0;
     this.timeLeft = DEFAULTS.TIME_LIMIT;
     this.player = null;
-    this.cursors = null;
-    this.keys = null;
-    this.jumpHeldMs = 0;
-    this.jumpActive = false;
-    this.facing = "east";
-    this.jumpAnimGraceMs = 0; // keep jump anim even if onFloor lingers
-    this.jumpMode = null; // 'idle' | 'run'
-    this.jumpFacing = "east";
-    this.spawnPoint = { x: 64, y: 400 };
+    this.players = [];
+    this.playerCount = 1;
+    this.playersAtGoal = new Set();
+    this.cameraTarget = null;
     this.platformSurfaces = [];
     this.platformTextureKey = "platform";
     this.platformDisplaySize = { width: 140, height: 60 };
@@ -47,6 +42,18 @@ export default class LevelScene extends Phaser.Scene {
   init(data) {
     this.levelId = data.levelId ?? DEFAULTS.START_LEVEL;
     this.score = data.scoreCarry ?? 0;
+    this.playerCount = Phaser.Math.Clamp(
+      data.playerCount ?? this.registry?.get?.("playerCount") ?? 1,
+      1,
+      2
+    );
+    this.players = [];
+    this.playersAtGoal = new Set();
+    this.player = null;
+    this.cameraTarget = null;
+    this.allCoinsCollected = false;
+    this.goalWarningCooldown = 0;
+    this.isLevelComplete = false;
     this.levelCoinTotal = 0;
     this.levelCoinsCollected = 0;
     this.coinProgressRetryTimer = null;
@@ -201,7 +208,7 @@ export default class LevelScene extends Phaser.Scene {
             )
               tileLefts.push(extraLeft);
           }
-          // Falls Breite < 16 war, sorge für mindestens eine Kachel
+          // Falls Breite < 16 war, sorge fグr mindestens eine Kachel
           if (tileLefts.length === 0) tileLefts.push(x);
 
           for (const leftPos of tileLefts) {
@@ -210,11 +217,11 @@ export default class LevelScene extends Phaser.Scene {
             if (groundTopRaw == null) continue; // keine Untersttzung -> keine Spike
             const groundTop = Math.round(groundTopRaw);
 
-            // Visual: Spike bündig auf der Plattformoberkante
+            // Visual: Spike bグndig auf der Plattformoberkante
             const spike = this.add.image(tileCenterX, groundTop, "spike");
             spike.setOrigin(0.5, 1);
 
-            // Hitbox: exakt 16x16 über der Oberkante (deckungsgleich zur Grafik)
+            // Hitbox: exakt 16x16 グber der Oberkante (deckungsgleich zur Grafik)
             const hitbox = this.add.rectangle(
               tileCenterX,
               groundTop - 8,
@@ -234,7 +241,7 @@ export default class LevelScene extends Phaser.Scene {
         }
       });
 
-      // KEIN this.platforms.refresh() hier, damit manuell gesetzte Body-Größen bestehen bleiben.
+      // KEIN this.platforms.refresh() hier, damit manuell gesetzte Body-Grβßen bestehen bleiben.
       this.time.delayedCall(0, () => this.buildVisiblePlatformsFromLines());
       this.time.delayedCall(1, () => this.spawnCoinsForPlatforms());
       // After building objects, refine spike placement for fairness/clarity
@@ -244,157 +251,59 @@ export default class LevelScene extends Phaser.Scene {
       if (this.coins?.refresh) this.coins.refresh();
       if (this.goals?.refresh) this.goals.refresh();
 
-      // Player
-      this.player = this.physics.add.sprite(spawn.x, spawn.y, "char_idle");
-      const VISUAL_SCALE = 1; // requested: visual scale 1
-      this.player.setScale(VISUAL_SCALE);
-      if (this.player.body?.setAllowGravity)
-        this.player.body.setAllowGravity(false); // avoid initial sink before we settle spawn
-      this.player.setCollideWorldBounds(true);
-      this.player.setMaxVelocity(
-        PHYSICS.PLAYER.MAX_VEL_X,
-        PHYSICS.PLAYER.MAX_VEL_Y
+      // Players (single oder 2-Spieler-Koop)
+      this.playerCount = Phaser.Math.Clamp(
+        Number.isFinite(this.playerCount) ? this.playerCount : 1,
+        1,
+        2
       );
-      this.player.setDragX(PHYSICS.PLAYER.DRAG_X);
-      this.player.setDepth(50);
-      this.playerLayer?.add(this.player);
-      // Refit physics body to match scaled sprite size
-      const dispW = this.player.displayWidth;
-      const dispH = this.player.displayHeight;
-      const minBodyWidth = 8;
-      const minBodyHeight = 8;
-      const rawBodyW = Math.round(dispW - 100); // narrower than sprite for fair collisions
-      const rawBodyH = Math.round(dispH * 0.8); // leave a bit of headroom
-      const bodyW = Phaser.Math.Clamp(rawBodyW, minBodyWidth, Math.round(dispW));
-      const bodyH = Phaser.Math.Clamp(rawBodyH, minBodyHeight, Math.round(dispH));
-      const offsetX = Math.round((dispW - bodyW) / 2);
-      const offsetY = Math.round(dispH - bodyH - 10); // 0 px Fuß-Luft, um "schweben" zu vermeiden
+      this.playersAtGoal = new Set();
+      this.players = this.createPlayers(spawn, objects);
+      this.player = this.players[0]?.sprite || null;
 
-      const unscaledW = bodyW / this.player.scaleX;
-      const unscaledH = bodyH / this.player.scaleY;
-      const unscaledOffX = offsetX / this.player.scaleX;
-      const unscaledOffY = offsetY / this.player.scaleY;
+      // Animations (fallback, PreloadScene already creates them once)
+      this.ensurePlayerAnimationsExist();
 
-      this.player.setBodySize(unscaledW, unscaledH);
-      this.player.setOffset(unscaledOffX, unscaledOffY);
-      if (this.player.body?.updateFromGameObject)
-        this.player.body.updateFromGameObject();
-
-      // Snap the player precisely onto the stage top (no drop)
-      const supportTop = this.stageRect
-        ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
-        : this.findGroundSupportTop(objects, spawn.x, this.player.body.width);
-      if (supportTop != null) {
-        // Place so the bottom of the physics body sits on the ground
-        const desiredTop = Math.round(supportTop - this.player.body.height - 10);
-        const desiredSpriteY =
-          desiredTop +
-          this.player.displayHeight / 2 -
-          this.player.body.offset.y;
-        // Reset fully to avoid initial penetration and clear velocities
-        if (this.player.body?.reset) {
-          this.player.body.reset(this.player.x, desiredSpriteY);
-        } else {
-          this.player.setY(desiredSpriteY);
-          if (this.player.body?.updateFromGameObject)
-            this.player.body.updateFromGameObject();
-        }
-        this.spawnPoint = { x: spawn.x, y: desiredSpriteY };
-      }
-
-      // Animations
-      if (!this.anims.exists("run_east")) {
-        this.anims.create({
-          key: "run_east",
-          frames: [
-            { key: "char_run_0" },
-            { key: "char_run_1" },
-            { key: "char_run_2" },
-            { key: "char_run_3" },
-          ],
-          frameRate: 10,
-          repeat: -1,
-        });
-      }
-      if (!this.anims.exists("run_west")) {
-        this.anims.create({
-          key: "run_west",
-          frames: [
-            { key: "char_run_w_0" },
-            { key: "char_run_w_1" },
-            { key: "char_run_w_2" },
-            { key: "char_run_w_3" },
-          ],
-          frameRate: 10,
-          repeat: -1,
-        });
-      }
-      if (!this.anims.exists("idle")) {
-        this.anims.create({
-          key: "idle",
-          frames: [{ key: "char_idle" }],
-          frameRate: 1,
-        });
-      }
-      if (!this.anims.exists("jump")) {
-        this.anims.create({
-          key: "jump",
-          frames: [{ key: "char_jump" }],
-          frameRate: 1,
-        });
-      }
-
-      // Physics
-      this.physics.add.collider(this.player, this.platforms);
-
-      this.physics.add.overlap(this.player, this.coins, (player, coin) => {
-        if (!coin?.active) return;
-        coin.destroy();
-        this.score += UI.SCORE_PER_COIN;
-        this.game.events.emit("score:add", UI.SCORE_PER_COIN, this.score);
-        playBeep(this, 1046, 80, "square");
-        this.levelCoinsCollected = Math.min(
-          this.levelCoinsCollected + 1,
-          this.levelCoinTotal || Number.MAX_SAFE_INTEGER
+      // Physics & overlaps
+      this.players.forEach((pState) => {
+        if (!pState?.sprite) return;
+        this.physics.add.collider(pState.sprite, this.platforms);
+        this.physics.add.overlap(
+          pState.sprite,
+          this.coins,
+          (_player, coin) => this.onCoinCollected(coin),
+          null,
+          this
         );
-        this.emitCoinProgress();
-        // Track remaining coins and require the flag to finish
-        if (this.getRemainingActiveCoins() === 0) {
-          this.allCoinsCollected = true;
-          this.notifyUI("Alle Münzen eingesammelt! Zur Flagge gehen.", 2200);
-        }
+        this.physics.add.overlap(
+          pState.sprite,
+          this.hazards,
+          () => this.onPlayerDeath(pState),
+          null,
+          this
+        );
+        this.physics.add.overlap(
+          pState.sprite,
+          this.goals,
+          () => this.handleGoalOverlap(pState),
+          null,
+          this
+        );
       });
-
-      this.physics.add.overlap(this.player, this.hazards, () => {
-        this.onPlayerDeath();
-      });
-
-      this.physics.add.overlap(
-        this.player,
-        this.goals,
-        this.handleGoalOverlap,
-        null,
-        this
-      );
 
       // Now that colliders are set and spawn is adjusted, enable gravity
-      if (this.player.body?.setAllowGravity)
-        this.player.body.setAllowGravity(true);
-
-      // Controls
-      this.cursors = this.input.keyboard.createCursorKeys();
-      this.keys = this.input.keyboard.addKeys({
-        W: "W",
-        A: "A",
-        D: "D",
-        SPACE: "SPACE",
-        M: CONTROLS.MUTE_TOGGLE_KEY,
+      this.players.forEach((pState) => {
+        if (pState?.sprite?.body?.setAllowGravity) {
+          pState.sprite.body.setAllowGravity(true);
+        }
       });
 
-      // Camera
+      // Camera follows a shared target to keep beide Spieler im Bild
       this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
-      this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-      this.cameras.main.setDeadzone(120, 80);
+      this.ensureCameraTarget(spawn);
+      this.cameras.main.startFollow(this.cameraTarget, true, 0.1, 0.1);
+      this.cameras.main.setDeadzone(140, 90);
+      this.updateCameraTarget();
 
       // HUD / UI
       this.scene.stop("UIScene");
@@ -465,9 +374,12 @@ export default class LevelScene extends Phaser.Scene {
     this.destroyPauseMenu();
   }
 
-  onPlayerDeath() {
+  onPlayerDeath(playerState) {
     playBeep(this, 180, 150, "sawtooth");
-    this.respawnPlayer();
+    if (playerState?.id) {
+      this.playersAtGoal.delete(playerState.id);
+    }
+    this.respawnPlayer(playerState);
   }
 
   onLevelComplete() {
@@ -492,6 +404,7 @@ export default class LevelScene extends Phaser.Scene {
           score: this.score,
           reason: "complete",
           final: true,
+          playerCount: this.playerCount,
         });
       });
     } else {
@@ -500,6 +413,7 @@ export default class LevelScene extends Phaser.Scene {
         this.scene.start("LevelTransitionScene", {
           levelId: this.levelId + 1,
           scoreCarry: this.score,
+          playerCount: this.playerCount,
         });
       });
     }
@@ -671,143 +585,452 @@ export default class LevelScene extends Phaser.Scene {
     this.wasPhysicsPausedBeforeMenu = false;
   }
 
-  respawnPlayer() {
-    const p = this.spawnPoint || { x: 64, y: 400 };
-    // Reset motion
-    this.player.setAcceleration(0, 0);
-    this.player.setVelocity(0, 0);
-    this.jumpActive = false;
-    this.jumpHeldMs = 0;
-    this.jumpMode = null;
-    this.jumpAnimGraceMs = 0;
-    // Place exactly at spawn body position
-    if (this.player.body?.reset) {
-      this.player.body.reset(p.x, p.y);
+  respawnPlayer(playerState) {
+    const state = playerState || this.players[0];
+    const sprite = state?.sprite || this.player;
+    const spawn = state?.spawnPoint || { x: 64, y: 400 };
+    if (!sprite) return;
+    sprite.setAcceleration?.(0, 0);
+    sprite.setVelocity?.(0, 0);
+    state.jumpActive = false;
+    state.jumpHeldMs = 0;
+    state.jumpMode = null;
+    state.jumpAnimGraceMs = 0;
+    state.reachedGoal = false;
+    if (sprite.body?.reset) {
+      sprite.body.reset(spawn.x, spawn.y);
     } else {
-      this.player.setPosition(p.x, p.y);
-      if (this.player.body?.updateFromGameObject)
-        this.player.body.updateFromGameObject();
+      sprite.setPosition(spawn.x, spawn.y);
+      sprite.body?.updateFromGameObject?.();
     }
-    // Face right by default at spawn
-    this.facing = "east";
-    this.player.anims.stop();
-    this.player.setTexture("char_rot_e");
+    state.facing = "east";
+    sprite.anims?.stop();
+    const idleKey = state.animKeys?.rotEast || "char_rot_e";
+    sprite.setTexture?.(idleKey);
   }
 
   update(time, delta) {
     if (this.bg) {
       this.bg.tilePositionX = this.cameras.main.scrollX * 0.3;
     }
-    if (!this.player || this.physics.world.isPaused) return;
+    if (this.physics.world.isPaused) return;
+    if (!this.players?.length) return;
 
-    const left = this.cursors.left.isDown || this.keys.A.isDown;
-    const right = this.cursors.right.isDown || this.keys.D.isDown;
-    const upPressed =
-      Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
-      Phaser.Input.Keyboard.JustDown(this.keys.W) ||
-      Phaser.Input.Keyboard.JustDown(this.keys.SPACE);
-    const upDown =
-      this.cursors.up.isDown || this.keys.W.isDown || this.keys.SPACE.isDown;
+    this.players.forEach((pState) => this.updatePlayerState(pState, delta));
+    this.updateCameraTarget();
+  }
 
-    // Horizontal movement via acceleration
+  updatePlayerState(state, delta) {
+    const sprite = state?.sprite;
+    if (!sprite?.body) return;
+    const controls = state.controls || {};
+    const left = controls.left?.() || false;
+    const right = controls.right?.() || false;
+    const upPressed = controls.jumpJustDown?.() || false;
+    const upDown = controls.jumpDown?.() || false;
+
     if (left) {
-      this.player.setAccelerationX(-PHYSICS.PLAYER.ACCEL);
-      this.facing = "west";
+      sprite.setAccelerationX(-PHYSICS.PLAYER.ACCEL);
+      state.facing = "west";
     } else if (right) {
-      this.player.setAccelerationX(PHYSICS.PLAYER.ACCEL);
-      this.facing = "east";
+      sprite.setAccelerationX(PHYSICS.PLAYER.ACCEL);
+      state.facing = "east";
     } else {
-      this.player.setAccelerationX(0);
+      sprite.setAccelerationX(0);
     }
 
-    const onFloor = this.player.body.onFloor();
-    if (this.jumpAnimGraceMs > 0) this.jumpAnimGraceMs -= delta;
+    const onFloor = sprite.body.onFloor();
+    if (state.jumpAnimGraceMs > 0) state.jumpAnimGraceMs -= delta;
     let justJumped = false;
 
-    // Start jump
     if (upPressed && onFloor) {
-      this.player.setVelocityY(PHYSICS.PLAYER.JUMP_SPEED);
-      this.jumpActive = true;
-      this.jumpHeldMs = 0;
+      sprite.setVelocityY(PHYSICS.PLAYER.JUMP_SPEED);
+      state.jumpActive = true;
+      state.jumpHeldMs = 0;
       justJumped = true;
-      this.jumpAnimGraceMs = 140; // ms to ensure animation shows reliably
-      // Snapshot jump mode and facing at takeoff
-      this.jumpMode = left || right ? "run" : "idle";
-      this.jumpFacing = this.facing;
+      state.jumpAnimGraceMs = 140;
+      state.jumpMode = left || right ? "run" : "idle";
+      state.jumpFacing = state.facing;
       const takeoffKey =
-        this.jumpMode === "run"
-          ? this.jumpFacing === "west"
-            ? "run_jump_west"
-            : "run_jump_east"
-          : this.jumpFacing === "west"
-          ? "jump_west"
-          : "jump_east";
-      // Force-restart jump animation at takeoff (ignoreIfPlaying = false)
-      this.player.play(takeoffKey);
+        state.jumpMode === "run"
+          ? state.jumpFacing === "west"
+            ? state.animKeys.runJumpWest
+            : state.animKeys.runJumpEast
+          : state.jumpFacing === "west"
+          ? state.animKeys.jumpWest
+          : state.animKeys.jumpEast;
+      sprite.play(takeoffKey);
       playBeep(this, 520, 80, "triangle");
     }
 
-    // Variable jump height by hold duration
-    if (this.jumpActive) {
-      if (upDown && this.jumpHeldMs < PHYSICS.PLAYER.JUMP_MAX_HOLD_MS) {
-        this.jumpHeldMs += delta;
-        this.player.setVelocityY(PHYSICS.PLAYER.JUMP_SPEED);
+    if (state.jumpActive) {
+      if (upDown && state.jumpHeldMs < PHYSICS.PLAYER.JUMP_MAX_HOLD_MS) {
+        state.jumpHeldMs += delta;
+        sprite.setVelocityY(PHYSICS.PLAYER.JUMP_SPEED);
       } else {
-        this.jumpActive = false;
+        state.jumpActive = false;
       }
     }
     if (onFloor && !upDown) {
-      this.jumpActive = false;
+      state.jumpActive = false;
     }
 
-    // Animations / facing
-    const vx = this.player.body.velocity.x;
-    const vy = this.player.body.velocity.y;
-    const airborne = justJumped || !onFloor || this.jumpAnimGraceMs > 0;
+    const vx = sprite.body.velocity.x;
+    const airborne = justJumped || !onFloor || state.jumpAnimGraceMs > 0;
     if (airborne) {
-      // Keep the jump animation chosen at takeoff until landing
-      const mode = this.jumpMode || (left || right ? "run" : "idle");
-      const face = this.jumpFacing || this.facing;
+      const mode = state.jumpMode || (left || right ? "run" : "idle");
+      const face = state.jumpFacing || state.facing;
       const key =
         mode === "run"
           ? face === "west"
-            ? "run_jump_west"
-            : "run_jump_east"
+            ? state.animKeys.runJumpWest
+            : state.animKeys.runJumpEast
           : face === "west"
-          ? "jump_west"
-          : "jump_east";
-      if (this.player.anims.currentAnim?.key !== key)
-        this.player.play(key, true);
+          ? state.animKeys.jumpWest
+          : state.animKeys.jumpEast;
+      if (sprite.anims.currentAnim?.key !== key) sprite.play(key, true);
     } else if (Math.abs(vx) > 10) {
-      if (vx > 0) {
-        if (this.player.anims.currentAnim?.key !== "run_east")
-          this.player.play("run_east", true);
-      } else {
-        if (this.player.anims.currentAnim?.key !== "run_west")
-          this.player.play("run_west", true);
-      }
+      const key = vx > 0 ? state.animKeys.runEast : state.animKeys.runWest;
+      if (sprite.anims.currentAnim?.key !== key) sprite.play(key, true);
     } else {
-      // Idle should be a static facing frame (rotations east/west)
-      const idleKey = this.facing === "west" ? "char_rot_w" : "char_rot_e";
-      this.player.anims.stop();
-      this.player.setTexture(idleKey);
+      const idleKey = state.facing === "west" ? state.animKeys.rotWest : state.animKeys.rotEast;
+      sprite.anims.stop();
+      sprite.setTexture(idleKey);
     }
 
-    // Clear jump mode once firmly on ground and not pressing jump
     if (onFloor && !justJumped && !upDown) {
-      this.jumpMode = null;
+      state.jumpMode = null;
+    }
+  }
+
+  createPlayers(spawn, objects) {
+    const players = [];
+    const secondOffset = 32;
+    const configs = [
+      { id: "P1", prefix: "char", offset: 0, controls: this.createPlayerOneControls() },
+    ];
+    if (this.playerCount === 2) {
+      configs.push({
+        id: "P2",
+        prefix: "char2",
+        offset: secondOffset,
+        controls: this.createPlayerTwoControls(),
+      });
+    }
+
+    configs.forEach((cfg) => {
+      const state = this.createSinglePlayer(spawn, objects, cfg);
+      if (state) players.push(state);
+    });
+    return players;
+  }
+
+  createSinglePlayer(spawn, objects, cfg) {
+    if (!spawn) return null;
+    const { id, prefix, offset = 0, controls } = cfg || {};
+    const startX = (spawn.x || 0) + offset;
+    const startY = spawn.y || 0;
+    const textureKey = prefix === "char2" ? "char2_idle" : "char_idle";
+    const sprite = this.physics.add.sprite(startX, startY, textureKey);
+    sprite.setScale(1);
+    if (sprite.body?.setAllowGravity) sprite.body.setAllowGravity(false);
+    sprite.setCollideWorldBounds(true);
+    sprite.setMaxVelocity(PHYSICS.PLAYER.MAX_VEL_X, PHYSICS.PLAYER.MAX_VEL_Y);
+    sprite.setDragX(PHYSICS.PLAYER.DRAG_X);
+    sprite.setDepth(50);
+    this.playerLayer?.add(sprite);
+
+    const dispW = sprite.displayWidth;
+    const dispH = sprite.displayHeight;
+    const minBodyWidth = 8;
+    const minBodyHeight = 8;
+    const rawBodyW = Math.round(dispW - 100);
+    const rawBodyH = Math.round(dispH * 0.8);
+    const bodyW = Phaser.Math.Clamp(rawBodyW, minBodyWidth, Math.round(dispW));
+    const bodyH = Phaser.Math.Clamp(rawBodyH, minBodyHeight, Math.round(dispH));
+    const offsetX = Math.round((dispW - bodyW) / 2);
+    const offsetY = Math.round(dispH - bodyH - 10);
+
+    const unscaledW = bodyW / sprite.scaleX;
+    const unscaledH = bodyH / sprite.scaleY;
+    const unscaledOffX = offsetX / sprite.scaleX;
+    const unscaledOffY = offsetY / sprite.scaleY;
+
+    sprite.setBodySize(unscaledW, unscaledH);
+    sprite.setOffset(unscaledOffX, unscaledOffY);
+    sprite.body?.updateFromGameObject?.();
+
+    const supportTop = this.stageRect
+      ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
+      : this.findGroundSupportTop(objects, startX, sprite.body?.width || sprite.displayWidth);
+    let spawnPoint = { x: startX, y: startY };
+    if (supportTop != null) {
+      const desiredTop = Math.round(
+        supportTop - (sprite.body?.height || sprite.displayHeight) - 10
+      );
+      const desiredSpriteY =
+        desiredTop + sprite.displayHeight / 2 - (sprite.body?.offset?.y ?? 0);
+      if (sprite.body?.reset) {
+        sprite.body.reset(startX, desiredSpriteY);
+      } else {
+        sprite.setY(desiredSpriteY);
+        sprite.body?.updateFromGameObject?.();
+      }
+      spawnPoint = { x: startX, y: desiredSpriteY };
+    }
+
+    const animKeys = this.buildAnimKeys(prefix);
+    return {
+      id: id || prefix,
+      sprite,
+      controls,
+      facing: "east",
+      jumpActive: false,
+      jumpHeldMs: 0,
+      jumpMode: null,
+      jumpFacing: "east",
+      jumpAnimGraceMs: 0,
+      spawnPoint,
+      animKeys,
+      reachedGoal: false,
+    };
+  }
+
+  createPlayerOneControls() {
+    const cursors = this.input.keyboard.createCursorKeys();
+    return {
+      left: () => cursors.left.isDown,
+      right: () => cursors.right.isDown,
+      jumpJustDown: () => Phaser.Input.Keyboard.JustDown(cursors.up),
+      jumpDown: () => cursors.up.isDown,
+    };
+  }
+
+  createPlayerTwoControls() {
+    const keys = this.input.keyboard.addKeys({
+      left: "A",
+      right: "D",
+      jump: "W",
+      jumpAlt: "SPACE",
+    });
+    return {
+      left: () => keys.left.isDown,
+      right: () => keys.right.isDown,
+      jumpJustDown: () =>
+        Phaser.Input.Keyboard.JustDown(keys.jump) ||
+        Phaser.Input.Keyboard.JustDown(keys.jumpAlt),
+      jumpDown: () => keys.jump.isDown || keys.jumpAlt.isDown,
+    };
+  }
+
+  buildAnimKeys(prefix = "char") {
+    const isP2 = prefix === "char2";
+    return {
+      runEast: isP2 ? "char2_run_east" : "run_east",
+      runWest: isP2 ? "char2_run_west" : "run_west",
+      jumpEast: isP2 ? "char2_jump_east" : "jump_east",
+      jumpWest: isP2 ? "char2_jump_west" : "jump_west",
+      runJumpEast: isP2 ? "char2_run_jump_east" : "run_jump_east",
+      runJumpWest: isP2 ? "char2_run_jump_west" : "run_jump_west",
+      rotEast: isP2 ? "char2_rot_e" : "char_rot_e",
+      rotWest: isP2 ? "char2_rot_w" : "char_rot_w",
+    };
+  }
+
+  ensureCameraTarget(spawn = { x: 0, y: 0 }) {
+    if (this.cameraTarget) return;
+    this.cameraTarget = this.add.rectangle(
+      spawn.x || 0,
+      spawn.y || 0,
+      2,
+      2,
+      0x000000,
+      0
+    );
+    this.cameraTarget.setDepth(-999);
+  }
+
+  updateCameraTarget() {
+    if (!this.cameraTarget) return;
+    const active = (this.players || []).filter((p) => p?.sprite);
+    if (!active.length) return;
+    const sum = active.reduce(
+      (acc, p) => {
+        acc.x += p.sprite.x;
+        acc.y += p.sprite.y;
+        return acc;
+      },
+      { x: 0, y: 0 }
+    );
+    const avgX = sum.x / active.length;
+    const avgY = sum.y / active.length;
+    this.cameraTarget.setPosition(avgX, avgY);
+  }
+
+  ensurePlayerAnimationsExist() {
+    if (!this.anims.exists("run_east")) {
+      this.anims.create({
+        key: "run_east",
+        frames: [
+          { key: "char_run_0" },
+          { key: "char_run_1" },
+          { key: "char_run_2" },
+          { key: "char_run_3" },
+        ],
+        frameRate: 10,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("run_west")) {
+      this.anims.create({
+        key: "run_west",
+        frames: [
+          { key: "char_run_w_0" },
+          { key: "char_run_w_1" },
+          { key: "char_run_w_2" },
+          { key: "char_run_w_3" },
+        ],
+        frameRate: 10,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("jump_east")) {
+      this.anims.create({
+        key: "jump_east",
+        frames: Array.from({ length: 9 }, (_, i) => ({
+          key: `char_jump_e_${i}`,
+        })),
+        frameRate: 12,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("jump_west")) {
+      this.anims.create({
+        key: "jump_west",
+        frames: Array.from({ length: 9 }, (_, i) => ({
+          key: `char_jump_w_${i}`,
+        })),
+        frameRate: 12,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("run_jump_east")) {
+      this.anims.create({
+        key: "run_jump_east",
+        frames: Array.from({ length: 8 }, (_, i) => ({
+          key: `char_runjump_e_${i}`,
+        })),
+        frameRate: 14,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("run_jump_west")) {
+      this.anims.create({
+        key: "run_jump_west",
+        frames: Array.from({ length: 8 }, (_, i) => ({
+          key: `char_runjump_w_${i}`,
+        })),
+        frameRate: 14,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("char2_run_east")) {
+      this.anims.create({
+        key: "char2_run_east",
+        frames: [
+          { key: "char2_run_0" },
+          { key: "char2_run_1" },
+          { key: "char2_run_2" },
+          { key: "char2_run_3" },
+        ],
+        frameRate: 10,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("char2_run_west")) {
+      this.anims.create({
+        key: "char2_run_west",
+        frames: [
+          { key: "char2_run_w_0" },
+          { key: "char2_run_w_1" },
+          { key: "char2_run_w_2" },
+          { key: "char2_run_w_3" },
+        ],
+        frameRate: 10,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("char2_jump_east")) {
+      this.anims.create({
+        key: "char2_jump_east",
+        frames: Array.from({ length: 9 }, (_, i) => ({
+          key: `char2_jump_e_${i}`,
+        })),
+        frameRate: 12,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("char2_jump_west")) {
+      this.anims.create({
+        key: "char2_jump_west",
+        frames: Array.from({ length: 9 }, (_, i) => ({
+          key: `char2_jump_w_${i}`,
+        })),
+        frameRate: 12,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("char2_run_jump_east")) {
+      this.anims.create({
+        key: "char2_run_jump_east",
+        frames: Array.from({ length: 8 }, (_, i) => ({
+          key: `char2_runjump_e_${i}`,
+        })),
+        frameRate: 14,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("char2_run_jump_west")) {
+      this.anims.create({
+        key: "char2_run_jump_west",
+        frames: Array.from({ length: 8 }, (_, i) => ({
+          key: `char2_runjump_w_${i}`,
+        })),
+        frameRate: 14,
+        repeat: -1,
+      });
+    }
+  }
+  onCoinCollected(coin) {
+    if (!coin?.active) return;
+    coin.destroy();
+    this.score += UI.SCORE_PER_COIN;
+    this.game.events.emit("score:add", UI.SCORE_PER_COIN, this.score);
+    playBeep(this, 1046, 80, "square");
+    this.levelCoinsCollected = Math.min(
+      this.levelCoinsCollected + 1,
+      this.levelCoinTotal || Number.MAX_SAFE_INTEGER
+    );
+    this.emitCoinProgress();
+    if (this.getRemainingActiveCoins() === 0) {
+      this.allCoinsCollected = true;
+      this.notifyUI("Alle Muenzen eingesammelt! Zur Flagge gehen.", 2200);
     }
   }
 
   // Return rotation texture key using only east/west
-  directionKeyFor(vx, _vy) {
+  directionKeyFor(state, vx, _vy) {
+    const facing = state?.facing || "east";
     const ax = Math.abs(vx);
     if (ax > 30) {
-      return vx > 0 ? "char_rot_e" : "char_rot_w";
+      return vx > 0
+        ? state?.animKeys?.rotEast || "char_rot_e"
+        : state?.animKeys?.rotWest || "char_rot_w";
     }
-    return this.facing === "west" ? "char_rot_w" : "char_rot_e";
+    return facing === "west"
+      ? state?.animKeys?.rotWest || "char_rot_w"
+      : state?.animKeys?.rotEast || "char_rot_e";
   }
-
   initializeRenderLayers() {
     this.stageLayer?.destroy(true);
     this.platformLayer?.destroy(true);
@@ -1216,18 +1439,27 @@ export default class LevelScene extends Phaser.Scene {
     return preferred || "level_bg";
   }
 
-  handleGoalOverlap() {
+  handleGoalOverlap(playerState) {
     if (!this.allCoinsCollected && this.getRemainingActiveCoins() > 0) {
       if (this.time.now >= this.goalWarningCooldown) {
         this.goalWarningCooldown = this.time.now + 1500;
-        this.notifyUI("Es müssen alle Münzen eingesammelt werden", 2000);
+        this.notifyUI("Es muessen alle Muenzen eingesammelt werden", 2000);
         playBeep(this, 300, 120, "sawtooth");
       }
       return;
     }
-    this.onLevelComplete();
+    if (this.playerCount <= 1 || !playerState) {
+      this.onLevelComplete();
+      return;
+    }
+    const id = playerState.id || `p-${this.playersAtGoal.size + 1}`;
+    this.playersAtGoal.add(id);
+    if (this.playersAtGoal.size >= this.playerCount) {
+      this.onLevelComplete();
+    } else {
+      this.notifyUI("Warte auf Mitspieler an der Flagge", 1500);
+    }
   }
-
   getRemainingActiveCoins() {
     return (this.coins?.getChildren?.() || []).filter((c) => c.active).length;
   }
@@ -1267,3 +1499,7 @@ export default class LevelScene extends Phaser.Scene {
     }
   }
 }
+
+
+
+

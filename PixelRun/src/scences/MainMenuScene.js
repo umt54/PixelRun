@@ -8,6 +8,7 @@ export default class MainMenuScene extends Phaser.Scene {
     super('MainMenuScene');
     this.mode = 'root'; // root | levelselect | settings
     this.menuTexts = [];
+    this.playerCount = 1;
   }
 
   create() {
@@ -16,6 +17,7 @@ export default class MainMenuScene extends Phaser.Scene {
     this.progress = loadProgress();
     const settings = loadSettings();
     this.registry.set('settings', settings);
+    this.playerCount = this.registry.get('playerCount') || 1;
 
     const info = [
       `Enter/Click: Auswahl`,
@@ -24,7 +26,7 @@ export default class MainMenuScene extends Phaser.Scene {
     ];
     this.add.text(400, 150, info.join('\n'), { fontSize: 14, color: '#A0A8BD', align: 'center' }).setOrigin(0.5);
 
-    this.renderRootMenu();
+    this.renderPlayerModePrompt();
 
     this.input.keyboard.on('keydown-ESC', () => {
       this.mode = 'root';
@@ -37,9 +39,38 @@ export default class MainMenuScene extends Phaser.Scene {
     this.menuTexts = [];
   }
 
+  renderPlayerModePrompt() {
+    this.clearMenu();
+    this.mode = 'modeSelect';
+    const title = this.add.text(400, 210, 'Modus waehlen', { fontSize: 32, color: '#E7F0FF' }).setOrigin(0.5);
+    const hint = this.add
+      .text(400, 245, 'Singleplayer oder 2-Spieler-Koop?', { fontSize: 16, color: '#A0A8BD' })
+      .setOrigin(0.5);
+    this.menuTexts.push(title, hint);
+
+    const items = [
+      { label: 'Singleplayer', action: () => this.setPlayerMode(1) },
+      { label: '2 Spieler (Koop)', action: () => this.setPlayerMode(2) }
+    ];
+    this.createButtons(items, 280);
+  }
+
+  setPlayerMode(count) {
+    this.playerCount = count === 2 ? 2 : 1;
+    this.registry.set('playerCount', this.playerCount);
+    this.mode = 'root';
+    this.renderRootMenu();
+  }
+
   renderRootMenu() {
     this.clearMenu();
+    const currentMode = this.playerCount === 2 ? '2 Spieler (Koop)' : 'Singleplayer';
+    const modeLabel = this.add
+      .text(400, 195, `Aktueller Modus: ${currentMode}`, { fontSize: 18, color: '#7cceff' })
+      .setOrigin(0.5);
+    this.menuTexts.push(modeLabel);
     const items = [
+      { label: 'Modus aendern', action: () => this.renderPlayerModePrompt() },
       { label: 'Start (Level 1)', action: () => this.startLevel(DEFAULTS.START_LEVEL) },
       { label: 'Levelauswahl', action: () => { this.mode = 'levelselect'; this.renderLevelSelect(); } },
       { label: 'Einstellungen', action: () => { this.mode = 'settings'; this.renderSettings(); } }
@@ -119,6 +150,6 @@ export default class MainMenuScene extends Phaser.Scene {
 
   startLevel(levelId) {
     playBeep(this, 520, 80, 'triangle');
-    this.scene.start('LevelScene', { levelId, scoreCarry: 0 });
+    this.scene.start('LevelScene', { levelId, scoreCarry: 0, playerCount: this.playerCount });
   }
 }
