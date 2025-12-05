@@ -5,6 +5,8 @@ import { loadProgress, saveProgress } from "../state/saveSystem.js";
 
 // Grafik nach unten rücken (nur VISUELL)
 const PLATFORM_Y_OFFSET = 40;
+const SPLIT_DISTANCE_ON = 520;
+const SPLIT_DISTANCE_OFF = 420;
 
 
 export default class LevelScene extends Phaser.Scene {
@@ -17,6 +19,10 @@ export default class LevelScene extends Phaser.Scene {
     this.players = [];
     this.playerCount = 1;
     this.playersAtGoal = new Set();
+    this.splitCamera = null;
+    this.splitActive = false;
+    this.cameraTargetP1 = null;
+    this.cameraTargetP2 = null;
     this.cameraTarget = null;
     this.platformSurfaces = [];
     this.platformTextureKey = "platform";
@@ -50,6 +56,10 @@ export default class LevelScene extends Phaser.Scene {
     this.players = [];
     this.playersAtGoal = new Set();
     this.player = null;
+    this.splitCamera = null;
+    this.splitActive = false;
+    this.cameraTargetP1 = null;
+    this.cameraTargetP2 = null;
     this.cameraTarget = null;
     this.allCoinsCollected = false;
     this.goalWarningCooldown = 0;
@@ -301,8 +311,10 @@ export default class LevelScene extends Phaser.Scene {
       // Camera follows a shared target to keep beide Spieler im Bild
       this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
       this.ensureCameraTarget(spawn);
-      this.cameras.main.startFollow(this.cameraTarget, true, 0.1, 0.1);
-      this.cameras.main.setDeadzone(140, 90);
+      this.ensurePlayerCameraTargets(spawn);
+      this.createSplitCamera();
+      this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+      this.setSplitMode(false);
       this.updateCameraTarget();
 
       // HUD / UI
@@ -618,6 +630,7 @@ export default class LevelScene extends Phaser.Scene {
 
     this.players.forEach((pState) => this.updatePlayerState(pState, delta));
     this.updateCameraTarget();
+    this.updateSplitScreenLogic();
   }
 
   updatePlayerState(state, delta) {
@@ -700,6 +713,28 @@ export default class LevelScene extends Phaser.Scene {
 
     if (onFloor && !justJumped && !upDown) {
       state.jumpMode = null;
+    }
+  }
+
+  updateSplitScreenLogic() {
+    if (this.playerCount <= 1 || this.players.length < 2) {
+      if (this.splitActive) this.setSplitMode(false);
+      return;
+    }
+    const p1 = this.players[0]?.sprite;
+    const p2 = this.players[1]?.sprite;
+    if (!p1 || !p2) {
+      if (this.splitActive) this.setSplitMode(false);
+      return;
+    }
+    if (this.splitActive) {
+      this.updateSplitCameraFollows();
+    }
+    const dist = Math.abs(p1.x - p2.x);
+    if (!this.splitActive && dist > SPLIT_DISTANCE_ON) {
+      this.setSplitMode(true);
+    } else if (this.splitActive && dist < SPLIT_DISTANCE_OFF) {
+      this.setSplitMode(false);
     }
   }
 
@@ -850,6 +885,65 @@ export default class LevelScene extends Phaser.Scene {
     this.cameraTarget.setDepth(-999);
   }
 
+  ensurePlayerCameraTargets(spawn = { x: 0, y: 0 }) {
+    if (!this.cameraTargetP1) {
+      this.cameraTargetP1 = this.add.rectangle(
+        spawn.x || 0,
+        spawn.y || 0,
+        2,
+        2,
+        0x000000,
+        0
+      );
+      this.cameraTargetP1.setDepth(-999);
+    }
+    if (!this.cameraTargetP2) {
+      this.cameraTargetP2 = this.add.rectangle(
+        spawn.x || 0,
+        spawn.y || 0,
+        2,
+        2,
+        0x000000,
+        0
+      );
+      this.cameraTargetP2.setDepth(-999);
+    }
+  }
+
+  createSplitCamera() {
+    if (this.splitCamera) return;
+    const w = this.scale?.width ?? 800;
+    const h = this.scale?.height ?? 480;
+    this.splitCamera = this.cameras.add(0, 0, w / 2, h);
+    this.splitCamera.setBackgroundColor("#101428");
+    this.splitCamera.setBounds(0, 0, this.physics.world.bounds.width, this.physics.world.bounds.height);
+    this.splitCamera.setVisible(false);
+  }
+
+  setSplitMode(active) {
+    const width = this.scale?.width ?? 800;
+    const height = this.scale?.height ?? 480;
+    this.splitActive = !!active && this.playerCount > 1 && this.players.length > 1;
+    if (!this.splitActive) {
+      this.cameras.main.setViewport(0, 0, width, height);
+      this.cameras.main.startFollow(this.cameraTarget, true, 0.1, 0.1);
+      this.cameras.main.setDeadzone(140, 90);
+      if (this.splitCamera) {
+        this.splitCamera.setVisible(false);
+        this.splitCamera.stopFollow();
+      }
+      this.dividerLine?.setVisible(false);
+      return;
+    }
+
+    // Split vertically (links P1, rechts P2)
+    this.cameras.main.setViewport(0, 0, width / 2, height);
+    this.splitCamera?.setViewport(width / 2, 0, width / 2, height);
+    this.splitCamera?.setVisible(true);
+    this.ensureDividerLine(width, height);
+    this.updateSplitCameraFollows();
+  }
+
   updateCameraTarget() {
     if (!this.cameraTarget) return;
     const active = (this.players || []).filter((p) => p?.sprite);
@@ -865,6 +959,33 @@ export default class LevelScene extends Phaser.Scene {
     const avgX = sum.x / active.length;
     const avgY = sum.y / active.length;
     this.cameraTarget.setPosition(avgX, avgY);
+    if (this.cameraTargetP1 && this.players[0]?.sprite) {
+      this.cameraTargetP1.setPosition(this.players[0].sprite.x, this.players[0].sprite.y);
+    }
+    if (this.cameraTargetP2 && this.players[1]?.sprite) {
+      this.cameraTargetP2.setPosition(this.players[1].sprite.x, this.players[1].sprite.y);
+    }
+  }
+
+  getPlayersOrderedByX() {
+    return (this.players || [])
+      .filter((p) => p?.sprite)
+      .slice()
+      .sort((a, b) => (a.sprite.x ?? 0) - (b.sprite.x ?? 0));
+  }
+
+  updateSplitCameraFollows() {
+    if (!this.splitActive || !this.splitCamera) return;
+    const ordered = this.getPlayersOrderedByX();
+    if (ordered.length < 2) return;
+    const left = ordered[0];
+    const right = ordered[ordered.length - 1];
+    const leftTarget = this.cameraTargetP1 && this.players[0] === left ? this.cameraTargetP1 : left.sprite;
+    const rightTarget = this.cameraTargetP2 && this.players[1] === right ? this.cameraTargetP2 : right.sprite;
+    this.cameras.main.startFollow(leftTarget, true, 0.12, 0.12);
+    this.cameras.main.setDeadzone(80, 60);
+    this.splitCamera.startFollow(rightTarget, true, 0.12, 0.12);
+    this.splitCamera.setDeadzone(80, 60);
   }
 
   ensurePlayerAnimationsExist() {
@@ -1030,6 +1151,18 @@ export default class LevelScene extends Phaser.Scene {
     return facing === "west"
       ? state?.animKeys?.rotWest || "char_rot_w"
       : state?.animKeys?.rotEast || "char_rot_e";
+  }
+
+  ensureDividerLine(width, height) {
+    if (!this.dividerLine) {
+      this.dividerLine = this.add.rectangle(0, 0, 2, height, 0x000000, 1);
+      this.dividerLine.setOrigin(0.5, 0);
+      this.dividerLine.setScrollFactor(0);
+      this.dividerLine.setDepth(5000);
+    }
+    this.dividerLine.setVisible(this.splitActive);
+    this.dividerLine.setPosition(width / 2, 0);
+    this.dividerLine.displayHeight = height;
   }
   initializeRenderLayers() {
     this.stageLayer?.destroy(true);
@@ -1499,6 +1632,7 @@ export default class LevelScene extends Phaser.Scene {
     }
   }
 }
+
 
 
 
