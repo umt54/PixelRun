@@ -13,11 +13,13 @@ export default class LevelTransitionScene extends Phaser.Scene {
     super('LevelTransitionScene');
     this.nextLevelId = 1;
     this.scoreCarry = 0;
+    this.playerCount = 1;
   }
 
   init(data = {}) {
     this.nextLevelId = data.levelId ?? 1;
     this.scoreCarry = data.scoreCarry ?? 0;
+    this.playerCount = data.playerCount ?? 1;
   }
 
   create() {
@@ -26,6 +28,7 @@ export default class LevelTransitionScene extends Phaser.Scene {
       this.scene.start('LevelScene', {
         levelId: this.nextLevelId,
         scoreCarry: this.scoreCarry,
+        playerCount: this.playerCount,
       });
     });
   }

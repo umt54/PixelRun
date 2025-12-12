@@ -29,7 +29,7 @@ export default class UIScene extends Phaser.Scene {
     this.syncCoinTotalsFromLevel();
 
     // Simple hint (no pause/time shown)
-    const hintText = `Mute: ${CONTROLS.MUTE_TOGGLE_KEY}   Pause: ESC/${CONTROLS.PAUSE_TOGGLE_KEY}`;
+    const hintText = `P1: Pfeile + UP    P2: A/D + W/SPACE    Mute: ${CONTROLS.MUTE_TOGGLE_KEY}    Pause: ESC/${CONTROLS.PAUSE_TOGGLE_KEY}`;
     const hint = this.add.text(400, 460, hintText, { fontSize: 12, color: '#A0A8BD' }).setOrigin(0.5, 1);
     hint.setDepth(1000);
 
