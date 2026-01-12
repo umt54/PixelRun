@@ -25,6 +25,10 @@ export default class LevelScene extends Phaser.Scene {
     this.cameraTargetP2 = null;
     this.cameraTarget = null;
     this.platformSurfaces = [];
+    this.groundSegments = [];
+    this.groundGapRanges = [];
+    this.spikeZones = [];
+    this.safeGroundSegments = [];
     this.platformTextureKey = "platform";
     this.platformDisplaySize = { width: 140, height: 60 };
     this.stageLayer = null;
@@ -61,6 +65,10 @@ export default class LevelScene extends Phaser.Scene {
     this.cameraTargetP1 = null;
     this.cameraTargetP2 = null;
     this.cameraTarget = null;
+    this.groundSegments = [];
+    this.groundGapRanges = [];
+    this.spikeZones = [];
+    this.safeGroundSegments = [];
     this.allCoinsCollected = false;
     this.goalWarningCooldown = 0;
     this.isLevelComplete = false;
@@ -117,7 +125,8 @@ export default class LevelScene extends Phaser.Scene {
       if (!layer) {
         throw new Error('Level data missing object layer "Objects"');
       }
-      const objects = layer.objects || [];
+      const rawObjects = layer.objects || [];
+      const objects = this.applyLevelLayoutRules(rawObjects);
 
       const { width: worldWidth, height: worldHeight } =
         this.computeWorldBounds(objects);
@@ -184,6 +193,21 @@ export default class LevelScene extends Phaser.Scene {
           (texHeight ? stageHeight / texHeight : 1);
         this.stageImage.setTileScale(tileScaleX, tileScaleY);
         this.stageLayer.add(this.stageImage);
+        if (this.groundGapRanges?.length && this.groundSegments?.length) {
+          this.stageImage.setVisible(false);
+          this.groundSegments.forEach((segment) => {
+            const segWidth = Math.round(segment.width || 0);
+            if (segWidth < 16) return;
+            const segLeft = Math.round(segment.left ?? segment.x ?? 0);
+            const segSprite = this.add
+              .tileSprite(segLeft, stageTop, segWidth, stageHeight, stageKey)
+              .setOrigin(0, 0)
+              .setDepth(0)
+              .setScrollFactor(1, 1);
+            segSprite.setTileScale(tileScaleX, tileScaleY);
+            this.stageLayer.add(segSprite);
+          });
+        }
       }
 
       // Player spawn
@@ -202,6 +226,25 @@ export default class LevelScene extends Phaser.Scene {
             this.createStageSegment({ x, y, width, height });
           }
         } else if (type === "hazard") {
+          if (obj.name === "gapKill") {
+            const gapWidth = Math.max(1, Math.round(width));
+            if (gapWidth < 16) return;
+            const gapLeft = Math.round(x);
+            const gapTop = Math.round(stageTop + 8);
+            const gapHeight = Math.max(16, Math.round(worldHeight - gapTop));
+            const hitbox = this.add.rectangle(
+              gapLeft + gapWidth * 0.5,
+              gapTop + gapHeight * 0.5,
+              gapWidth,
+              gapHeight,
+              0xd64545,
+              0
+            );
+            this.physics.add.existing(hitbox, true);
+            hitbox._gapKill = true;
+            this.hazards.add(hitbox);
+            return;
+          }
           // Build spikes per 16px tile. Each tile snaps pixelgenau auf die Plattformoberkante.
           const wholeTiles = Math.floor(width / 16);
           const remainder = width % 16;
@@ -223,7 +266,7 @@ export default class LevelScene extends Phaser.Scene {
 
           for (const leftPos of tileLefts) {
             const tileCenterX = Math.round(leftPos + 8);
-            const groundTopRaw = this.findGroundTopAtX(objects, tileCenterX);
+            const groundTopRaw = this.findStageTopAtX(objects, tileCenterX);
             if (groundTopRaw == null) continue; // keine Untersttzung -> keine Spike
             const groundTop = Math.round(groundTopRaw);
 
@@ -1398,6 +1441,180 @@ export default class LevelScene extends Phaser.Scene {
         this.coins.add(coin);
       });
     });
+    const stageTop = this.stageRect
+      ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
+      : Math.round(this.cameras.main.height - 64);
+    const groundSegments = this.groundSegments || [];
+    const spikeZones = this.spikeZones || [];
+    const gapRanges = this.groundGapRanges || [];
+    const extraCoinsMax = 6;
+    let extraCoins = 0;
+    let groundCoinPlaced = false;
+    let spikeCoinPlaced = false;
+    let gapCoinPlaced = false;
+
+    const isInSpikeZone = (x) =>
+      spikeZones.some((zone) => x >= zone.left + 8 && x <= zone.right - 8);
+
+    const jumpSpeed = Math.abs(PHYSICS.PLAYER.JUMP_SPEED || 0);
+    const gravityY = Math.max(1, PHYSICS.GRAVITY_Y || 1);
+    const playerJumpReach = jumpSpeed
+      ? Math.round((jumpSpeed * jumpSpeed) / (2 * gravityY))
+      : 80;
+    const maxJumpDistanceRaw = jumpSpeed
+      ? Math.round((PHYSICS.PLAYER.MAX_VEL_X || 0) * (2 * jumpSpeed / gravityY))
+      : 220;
+    const jumpHeightLimit = Math.max(48, playerJumpReach - 8);
+    const jumpDistanceLimit = Math.max(96, maxJumpDistanceRaw - 24);
+    const safeGroundSegments = this.safeGroundSegments || [];
+    const platformSurfaces = this.platformSurfaces || [];
+    const safeSurfaces = safeGroundSegments.concat(
+      platformSurfaces.map((surface) => ({
+        left: surface.left,
+        right: surface.right,
+        top: surface.top,
+      }))
+    );
+
+    const isSurfaceReachable = (surface, coinX, coinY) => {
+      const left = surface.left;
+      const right = surface.right;
+      const dist = coinX < left ? left - coinX : coinX > right ? coinX - right : 0;
+      if (dist > jumpDistanceLimit) return false;
+      const heightAbove = Math.max(0, surface.top - coinY);
+      if (heightAbove > jumpHeightLimit) return false;
+      return true;
+    };
+
+    const findNearestSurfaceLeft = (x) => {
+      let best = null;
+      let bestDist = Number.POSITIVE_INFINITY;
+      safeSurfaces.forEach((surface) => {
+        if (surface.right > x) return;
+        const dist = x - surface.right;
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = surface;
+        }
+      });
+      return best;
+    };
+
+    const findNearestSurfaceRight = (x) => {
+      let best = null;
+      let bestDist = Number.POSITIVE_INFINITY;
+      safeSurfaces.forEach((surface) => {
+        if (surface.left < x) return;
+        const dist = surface.left - x;
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = surface;
+        }
+      });
+      return best;
+    };
+
+    const canReachCoin = (coinX, coinY, requireBothSides, requireSurfaceAtX) => {
+      if (!safeSurfaces.length) return false;
+      const surfaceAtX = safeSurfaces.find(
+        (surface) => coinX >= surface.left && coinX <= surface.right
+      );
+      if (requireSurfaceAtX) {
+        return surfaceAtX ? isSurfaceReachable(surfaceAtX, coinX, coinY) : false;
+      }
+      if (requireBothSides) {
+        const leftSurface = findNearestSurfaceLeft(coinX);
+        const rightSurface = findNearestSurfaceRight(coinX);
+        if (!leftSurface || !rightSurface) return false;
+        if (!isSurfaceReachable(leftSurface, coinX, coinY)) return false;
+        if (!isSurfaceReachable(rightSurface, coinX, coinY)) return false;
+        return true;
+      }
+      if (surfaceAtX && isSurfaceReachable(surfaceAtX, coinX, coinY)) return true;
+      const leftSurface = findNearestSurfaceLeft(coinX);
+      if (leftSurface && isSurfaceReachable(leftSurface, coinX, coinY)) return true;
+      const rightSurface = findNearestSurfaceRight(coinX);
+      if (rightSurface && isSurfaceReachable(rightSurface, coinX, coinY)) return true;
+      return false;
+    };
+
+    const placeExtraCoin = (coinX, baseTop, offsetY) => {
+      if (extraCoins >= extraCoinsMax) return false;
+      const coin = this.physics.add
+        .staticImage(coinX, baseTop, "coin")
+        .setDepth(40)
+        .setVisible(true);
+      const coinHeight = coin.displayHeight || coin.height || baseCoinHeight;
+      coin.setY(baseTop - coinHeight * 0.5 - offsetY);
+      if (coin.body?.updateFromGameObject) coin.body.updateFromGameObject();
+      this.coinLayer?.add?.(coin);
+      this.coins.add(coin);
+      extraCoins += 1;
+      return true;
+    };
+
+    const maxCoinTries = 3;
+    const tryPlaceCoin = (
+      candidateXs,
+      baseTop,
+      offsetY,
+      requireBothSides,
+      requireSurfaceAtX
+    ) => {
+      let tries = 0;
+      for (const coinX of candidateXs) {
+        if (extraCoins >= extraCoinsMax) return false;
+        if (tries >= maxCoinTries) break;
+        tries += 1;
+        const coinY = baseTop - baseCoinHeight * 0.5 - offsetY;
+        if (!canReachCoin(coinX, coinY, requireBothSides, requireSurfaceAtX))
+          continue;
+        if (placeExtraCoin(coinX, baseTop, offsetY)) return true;
+      }
+      return false;
+    };
+
+    spikeZones.forEach((zone, index) => {
+      if (extraCoins >= extraCoinsMax) return;
+      const width = zone.right - zone.left;
+      if (width < 16) return;
+      if (index % 2 !== 0 && spikeCoinPlaced) return;
+      const center = zone.left + width * 0.5;
+      const candidates = [center, center - 16, center + 16].filter(
+        (x) => x >= zone.left + 8 && x <= zone.right - 8
+      );
+      if (tryPlaceCoin(candidates, stageTop, 50, true, false))
+        spikeCoinPlaced = true;
+    });
+
+    gapRanges.forEach((gap, index) => {
+      if (extraCoins >= extraCoinsMax) return;
+      const width = gap.right - gap.left;
+      if (width < 16) return;
+      if (index % 2 !== 0 && gapCoinPlaced) return;
+      const center = gap.left + width * 0.5;
+      const candidates = [center, center - 16, center + 16].filter(
+        (x) => x >= gap.left + 8 && x <= gap.right - 8
+      );
+      if (tryPlaceCoin(candidates, stageTop, 50, true, false))
+        gapCoinPlaced = true;
+    });
+
+    groundSegments.forEach((segment, index) => {
+      if (extraCoins >= extraCoinsMax) return;
+      const width = segment.width || 0;
+      if (width < 160) return;
+      if (index % 2 !== 0 && groundCoinPlaced) return;
+      const center = segment.left + width * 0.5;
+      const candidates = [
+        center,
+        segment.left + width * 0.35,
+        segment.left + width * 0.65,
+      ].filter((x) => !isInSpikeZone(x));
+      if (!candidates.length) return;
+      if (tryPlaceCoin(candidates, stageTop, 30, false, true))
+        groundCoinPlaced = true;
+    });
     const activeCoins = this.getRemainingActiveCoins();
     this.levelCoinTotal = activeCoins;
     this.levelCoinsCollected = 0;
@@ -1408,6 +1625,245 @@ export default class LevelScene extends Phaser.Scene {
     if (width < 48) return [width / 2];
     if (width < 112) return [width * 0.5];
     return [width * 0.35, width * 0.65];
+  }
+
+  applyLevelLayoutRules(objects = []) {
+    let maxId = 0;
+    let spawn = null;
+    let goal = null;
+    const stageGround = [];
+    const platforms = [];
+
+    objects.forEach((obj) => {
+      if (Number.isFinite(obj?.id)) maxId = Math.max(maxId, obj.id);
+      if (obj.type === "spawn") spawn = obj;
+      if (obj.type === "goal") goal = obj;
+      if (obj.type !== "ground") return;
+      if (this.isFloatingPlatform(obj)) {
+        platforms.push(obj);
+      } else {
+        stageGround.push(obj);
+      }
+    });
+
+    const groundGaps = this.buildGroundGapRanges(stageGround, spawn, goal);
+    const spikeZones = this.buildSpikeZones(platforms);
+    this.groundGapRanges = groundGaps;
+    this.spikeZones = spikeZones;
+    this.groundSegments = [];
+
+    const nextObjects = [];
+    let nextId = maxId + 1;
+
+    objects.forEach((obj) => {
+      if (obj.type === "hazard") return;
+      if (obj.type === "ground" && !this.isFloatingPlatform(obj)) {
+        const split = this.splitGroundWithGaps(obj, groundGaps, nextId);
+        nextId = split.nextId;
+        split.segments.forEach((segment) => {
+          nextObjects.push(segment);
+          this.groundSegments.push({
+            left: segment.x,
+            right: segment.x + (segment.width || 0),
+            width: segment.width || 0,
+            height: segment.height || 0,
+            top: segment.y - (segment.height || 0),
+          });
+        });
+        return;
+      }
+      nextObjects.push(obj);
+    });
+
+    spikeZones.forEach((zone) => {
+      const width = zone.right - zone.left;
+      if (width <= 0) return;
+      nextObjects.push({
+        id: nextId++,
+        name: "jumpSpikes",
+        type: "hazard",
+        x: zone.left,
+        y: 0,
+        width,
+        height: 16,
+      });
+    });
+    groundGaps.forEach((gap) => {
+      const width = gap.right - gap.left;
+      if (width < 16) return;
+      nextObjects.push({
+        id: nextId++,
+        name: "gapKill",
+        type: "hazard",
+        x: gap.left,
+        y: 0,
+        width,
+        height: 16,
+      });
+    });
+
+    this.safeGroundSegments = this.buildSafeGroundSegments(
+      this.groundSegments,
+      spikeZones
+    );
+
+    return nextObjects;
+  }
+
+  buildGroundGapRanges(segments, spawn, goal) {
+    const gaps = [];
+    if (!segments?.length) return gaps;
+    const TILE = 16;
+    const MIN_SEGMENT = 640;
+    const EDGE_BUFFER = 96;
+    const SAFE_BUFFER = 160;
+    const spawnX = spawn?.x ?? -99999;
+    const goalX = goal?.x ?? 99999;
+    const sorted = segments.slice().sort((a, b) => a.x - b.x);
+
+    sorted.forEach((segment, index) => {
+      const left = segment.x;
+      const right = segment.x + (segment.width || 0);
+      const width = right - left;
+      if (width < MIN_SEGMENT) return;
+      const gapCount = Math.max(1, Math.floor(width / 800));
+      const spacing = width / (gapCount + 1);
+
+      for (let i = 1; i <= gapCount; i++) {
+        const gapWidth = (i + index) % 2 === 0 ? 96 : 64;
+        const center = left + spacing * i;
+        let gapLeft = Math.round((center - gapWidth / 2) / TILE) * TILE;
+        let gapRight = gapLeft + gapWidth;
+        if (gapLeft < left + EDGE_BUFFER) continue;
+        if (gapRight > right - EDGE_BUFFER) continue;
+        const gapCenter = gapLeft + gapWidth / 2;
+        if (Math.abs(gapCenter - spawnX) < SAFE_BUFFER) continue;
+        if (Math.abs(gapCenter - goalX) < SAFE_BUFFER) continue;
+        gaps.push({ left: gapLeft, right: gapRight });
+      }
+    });
+
+    return gaps;
+  }
+
+  buildSpikeZones(platforms) {
+    const zones = [];
+    if (!platforms?.length) return zones;
+    const MIN_GAP = 16;
+    const MAX_GAP = 240;
+    const sorted = platforms.slice().sort((a, b) => a.x - b.x);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const leftEdge = sorted[i].x + (sorted[i].width || 0);
+      const rightEdge = sorted[i + 1].x;
+      const gap = rightEdge - leftEdge;
+      if (gap < MIN_GAP || gap > MAX_GAP) continue;
+      const zoneLeft = Math.ceil(leftEdge / 16) * 16;
+      const zoneRight = Math.floor(rightEdge / 16) * 16;
+      if (zoneRight - zoneLeft < 16) continue;
+      zones.push({ left: zoneLeft, right: zoneRight });
+    }
+    return zones;
+  }
+
+  buildSafeGroundSegments(segments, spikeZones) {
+    const safeSegments = [];
+    const zones = (spikeZones || []).slice().sort((a, b) => a.left - b.left);
+    (segments || []).forEach((segment) => {
+      const leftEdge = segment.left ?? segment.x ?? 0;
+      const rightEdge =
+        segment.right ?? ((segment.x || 0) + (segment.width || 0));
+      const top = segment.top ?? (segment.y - (segment.height || 0));
+      let cursor = leftEdge;
+      zones.forEach((zone) => {
+        if (zone.right <= leftEdge || zone.left >= rightEdge) return;
+        const cutLeft = Math.max(leftEdge, zone.left);
+        const cutRight = Math.min(rightEdge, zone.right);
+        if (cutLeft > cursor) {
+          const width = cutLeft - cursor;
+          if (width >= 16) {
+            safeSegments.push({
+              left: cursor,
+              right: cutLeft,
+              width,
+              top,
+            });
+          }
+        }
+        cursor = Math.max(cursor, cutRight);
+      });
+      if (cursor < rightEdge) {
+        const width = rightEdge - cursor;
+        if (width >= 16) {
+          safeSegments.push({
+            left: cursor,
+            right: rightEdge,
+            width,
+            top,
+          });
+        }
+      }
+    });
+    return safeSegments;
+  }
+
+  splitGroundWithGaps(ground, gaps, idSeed) {
+    const segments = [];
+    const leftEdge = ground.x;
+    const rightEdge = ground.x + (ground.width || 0);
+    const height = ground.height || 0;
+    const relevant = (gaps || [])
+      .filter((gap) => gap.right > leftEdge && gap.left < rightEdge)
+      .sort((a, b) => a.left - b.left);
+    let cursor = leftEdge;
+    let nextId = idSeed;
+
+    relevant.forEach((gap) => {
+      const gapLeft = Math.max(leftEdge, gap.left);
+      const gapRight = Math.min(rightEdge, gap.right);
+      if (gapLeft > cursor) {
+        const width = gapLeft - cursor;
+        if (width >= 16) {
+          segments.push({
+            ...ground,
+            id: nextId++,
+            x: cursor,
+            width,
+            height,
+          });
+        }
+      }
+      cursor = Math.max(cursor, gapRight);
+    });
+
+    if (cursor < rightEdge) {
+      const width = rightEdge - cursor;
+      if (width >= 16) {
+        segments.push({
+          ...ground,
+          id: nextId++,
+          x: cursor,
+          width,
+          height,
+        });
+      }
+    }
+
+    return { segments, nextId };
+  }
+
+  findStageTopAtX(objects, x) {
+    let best = null;
+    for (const obj of objects) {
+      if (obj.type !== "ground") continue;
+      if (this.isFloatingPlatform(obj)) continue;
+      const left = obj.x;
+      const right = obj.x + (obj.width || 0);
+      if (x >= left && x <= right) {
+        const top = obj.y - (obj.height || 0);
+        if (best == null || top > best) best = top;
+      }
+    }
+    return best;
   }
 
   // Find the top Y of a ground object spanning x, or null
@@ -1452,14 +1908,18 @@ export default class LevelScene extends Phaser.Scene {
       .slice()
       .sort((a, b) => a.x - b.x);
     const worldW = this.physics.world.bounds.width;
-    const stageTop = this.stageRect
-      ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
-      : Math.round(this.cameras.main.height - 64);
     const stageLeft = 0;
     const stageRight = worldW;
+    const spikeZones = this.spikeZones || [];
+    const safeGroundSegments = this.safeGroundSegments || [];
+    const isInSpikeZone = (x) =>
+      spikeZones.some((zone) => x >= zone.left + 8 && x <= zone.right - 8);
+    const isOnSafeGround = (x) =>
+      safeGroundSegments.some((segment) => x >= segment.left && x <= segment.right);
     const seen = new Set();
     const kept = [];
     for (const h of hazards) {
+      if (h._gapKill) continue;
       // Clamp within stage and snap to 16px grid
       const clampedX = Math.min(
         Math.max(Math.round(h.x), stageLeft + 8),
@@ -1472,14 +1932,33 @@ export default class LevelScene extends Phaser.Scene {
         if (h.destroy) h.destroy();
         continue;
       }
+      const snapX = stageLeft + 8 + idx * 16;
+      const inSpikeZone = isInSpikeZone(snapX);
+      if (!inSpikeZone) {
+        if (h._sprite?.destroy) h._sprite.destroy();
+        if (h.destroy) h.destroy();
+        continue;
+      }
+      if (isOnSafeGround(snapX)) {
+        if (h._sprite?.destroy) h._sprite.destroy();
+        if (h.destroy) h.destroy();
+        continue;
+      }
+      const stageTopRaw = this.findStageTopAtX(objects, snapX);
+      if (stageTopRaw == null) {
+        if (h._sprite?.destroy) h._sprite.destroy();
+        if (h.destroy) h.destroy();
+        continue;
+      }
+      const stageTop = Math.round(stageTopRaw);
       seen.add(idx);
       kept.push(h);
       // Place flush on stage top
-      if (h.setPosition) h.setPosition(stageLeft + 8 + idx * 16, stageTop - 8);
+      if (h.setPosition) h.setPosition(snapX, stageTop - 8);
       if (h.body?.updateFromGameObject) h.body.updateFromGameObject();
       if (h._sprite?.setPosition)
         h._sprite
-          .setPosition(stageLeft + 8 + idx * 16, stageTop)
+          .setPosition(snapX, stageTop)
           .setOrigin(0.5, 1);
     }
   }
