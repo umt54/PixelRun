@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import levelsData from '../level/levels.json';
 import { loadProgress, loadSettings, saveSettings } from '../state/saveSystem.js';
-import { DEFAULTS, CONTROLS, playBeep } from '../config.js';
+import { GAME, DEFAULTS, CONTROLS, playBeep } from '../config.js';
 
 export default class MainMenuScene extends Phaser.Scene {
   constructor() {
@@ -9,10 +9,34 @@ export default class MainMenuScene extends Phaser.Scene {
     this.mode = 'root'; // root | levelselect | settings
     this.menuTexts = [];
     this.playerCount = 1;
+    this.ui = {
+      fontFamily: 'Trebuchet MS, sans-serif',
+      colors: {
+        title: '#FFF2C9',
+        body: '#F4E9CF',
+        accent: '#FFD27A',
+        hover: '#FFEAA6',
+        disabled: '#7A7F8C',
+        shadow: '#1a1208'
+      }
+    };
   }
 
   create() {
-    this.add.text(400, 100, 'PixelRun', { fontSize: 48, color: '#E7F0FF' }).setOrigin(0.5);
+    const bg = this.add.image(GAME.WIDTH / 2, GAME.HEIGHT / 2, 'menu_bg');
+    const scale = Math.max(GAME.WIDTH / bg.width, GAME.HEIGHT / bg.height);
+    bg.setScale(scale).setDepth(-10);
+
+    this.add
+      .text(400, 100, 'PixelRun', {
+        fontFamily: this.ui.fontFamily,
+        fontSize: 52,
+        color: this.ui.colors.title,
+        stroke: this.ui.colors.shadow,
+        strokeThickness: 6
+      })
+      .setOrigin(0.5)
+      .setShadow(0, 3, this.ui.colors.shadow, 6, false, true);
 
     this.progress = loadProgress();
     const settings = loadSettings();
@@ -24,7 +48,17 @@ export default class MainMenuScene extends Phaser.Scene {
       `Tasten: Pfeile/WASD zum Bewegen, Space zum Springen`,
       `M: Mute/Unmute`
     ];
-    this.add.text(400, 150, info.join('\n'), { fontSize: 14, color: '#A0A8BD', align: 'center' }).setOrigin(0.5);
+    this.add
+      .text(400, 150, info.join('\n'), {
+        fontFamily: this.ui.fontFamily,
+        fontSize: 15,
+        color: this.ui.colors.body,
+        align: 'center',
+        stroke: this.ui.colors.shadow,
+        strokeThickness: 3
+      })
+      .setOrigin(0.5)
+      .setShadow(0, 2, this.ui.colors.shadow, 4, false, true);
 
     this.renderPlayerModePrompt();
 
@@ -42,10 +76,26 @@ export default class MainMenuScene extends Phaser.Scene {
   renderPlayerModePrompt() {
     this.clearMenu();
     this.mode = 'modeSelect';
-    const title = this.add.text(400, 210, 'Modus waehlen', { fontSize: 32, color: '#E7F0FF' }).setOrigin(0.5);
+    const title = this.add
+      .text(400, 210, 'Modus waehlen', {
+        fontFamily: this.ui.fontFamily,
+        fontSize: 32,
+        color: this.ui.colors.title,
+        stroke: this.ui.colors.shadow,
+        strokeThickness: 5
+      })
+      .setOrigin(0.5)
+      .setShadow(0, 2, this.ui.colors.shadow, 5, false, true);
     const hint = this.add
-      .text(400, 245, 'Singleplayer oder 2-Spieler-Koop?', { fontSize: 16, color: '#A0A8BD' })
+      .text(400, 245, 'Singleplayer oder 2-Spieler-Koop?', {
+        fontFamily: this.ui.fontFamily,
+        fontSize: 16,
+        color: this.ui.colors.body,
+        stroke: this.ui.colors.shadow,
+        strokeThickness: 3
+      })
       .setOrigin(0.5);
+    hint.setShadow(0, 2, this.ui.colors.shadow, 4, false, true);
     this.menuTexts.push(title, hint);
 
     const items = [
@@ -66,8 +116,15 @@ export default class MainMenuScene extends Phaser.Scene {
     this.clearMenu();
     const currentMode = this.playerCount === 2 ? '2 Spieler (Koop)' : 'Singleplayer';
     const modeLabel = this.add
-      .text(400, 195, `Aktueller Modus: ${currentMode}`, { fontSize: 18, color: '#7cceff' })
+      .text(400, 195, `Aktueller Modus: ${currentMode}`, {
+        fontFamily: this.ui.fontFamily,
+        fontSize: 18,
+        color: this.ui.colors.accent,
+        stroke: this.ui.colors.shadow,
+        strokeThickness: 3
+      })
       .setOrigin(0.5);
+    modeLabel.setShadow(0, 2, this.ui.colors.shadow, 4, false, true);
     this.menuTexts.push(modeLabel);
     const items = [
       { label: 'Modus aendern', action: () => this.renderPlayerModePrompt() },
@@ -127,13 +184,17 @@ export default class MainMenuScene extends Phaser.Scene {
     let y = startY;
     items.forEach(({ label, action, enabled = true }) => {
       const t = this.add.text(400, y, label, {
+        fontFamily: this.ui.fontFamily,
         fontSize: 24,
-        color: enabled ? '#E7F0FF' : '#666C80'
+        color: enabled ? this.ui.colors.body : this.ui.colors.disabled,
+        stroke: this.ui.colors.shadow,
+        strokeThickness: 3
       }).setOrigin(0.5).setInteractive({ useHandCursor: enabled });
+      t.setShadow(0, 2, this.ui.colors.shadow, 4, false, true);
 
       if (enabled) {
-        t.on('pointerover', () => t.setColor('#7cceff'));
-        t.on('pointerout', () => t.setColor('#E7F0FF'));
+        t.on('pointerover', () => t.setColor(this.ui.colors.hover));
+        t.on('pointerout', () => t.setColor(this.ui.colors.body));
         t.on('pointerup', () => action());
       }
 

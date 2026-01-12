@@ -11,6 +11,8 @@ export default class PreloadScene extends Phaser.Scene {
     // Level background images
     const bgUrl = new URL('../background/background.png', import.meta.url).href;
     this.load.image('level_bg', bgUrl);
+    const menuBgUrl = new URL('../background/menu.png', import.meta.url).href;
+    this.load.image('menu_bg', menuBgUrl);
     const snowBgUrl = new URL('../background/snow-background.png', import.meta.url).href;
     this.load.image('level_bg_snow', snowBgUrl);
     const desertBgUrl = new URL('../background/desert-background.png', import.meta.url).href;
