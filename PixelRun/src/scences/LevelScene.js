@@ -13,29 +13,18 @@ const COIN_Y_OFFSET = 0;
 const SPIKE_ZONE_X_OFFSET = 0;
 const SPIKE_ZONE_WIDTH_SCALE = 1;
 const GOAL_SAFE_BUFFER = 192;
+const LEVEL_END_STRETCH = 640;
+const GAP_MIN_WIDTH = 64;
+const LEVEL_END_STRETCH_BY_LEVEL = {
+  "1": 640,
+  "2": 800,
+  "3": 960,
+};
 const PRINT_LAYOUT_IDS = false;
 const EDITOR_ACCESS_TOKEN = "secret1";
 const EDITOR_GRID_SIZE = 16;
 const EDITOR_HISTORY_LIMIT = 50;
-const LEVEL_OVERRIDES = {
-  // "1": {
-  //   coins: [
-  //     { id: "c1", dx: 10, dy: 25 },
-  //     { id: "c7", remove: true },
-  //     { id: "c99", add: true, x: 420, y: 260 },
-  //   ],
-  //   platforms: [
-  //     { id: "p2", dx: 32, dy: -16 },
-  //     { id: "p6", remove: true },
-  //     { id: "p20", add: true, x: 640, y: 320, width: 140, height: 16 },
-  //   ],
-  //   spikes: [
-  //     { id: "s4", dx: -16, dy: 0 },
-  //     { id: "s9", remove: true },
-  //     { id: "s30", add: true, x: 720, y: 420 },
-  //   ],
-  // },
-};
+
 
 export default class LevelScene extends Phaser.Scene {
   constructor() {
@@ -57,6 +46,26 @@ export default class LevelScene extends Phaser.Scene {
     this.groundGapRanges = [];
     this.spikeZones = [];
     this.safeGroundSegments = [];
+    this.baseGroundSegments = [];
+    this.gapHitboxes = [];
+    this.gapOverlays = [];
+    this.groundColliders = [];
+    this.stageTop = null;
+    this.stageHeight = null;
+    this.stageKey = null;
+    this.stageTileScaleX = 1;
+    this.stageTileScaleY = 1;
+    this.stageSegmentSprites = [];
+    this.baseGroundSegments = [];
+    this.gapHitboxes = [];
+    this.gapOverlays = [];
+    this.groundColliders = [];
+    this.stageTop = null;
+    this.stageHeight = null;
+    this.stageKey = null;
+    this.stageTileScaleX = 1;
+    this.stageTileScaleY = 1;
+    this.stageSegmentSprites = [];
     this.platformTextureKey = "platform";
     this.platformDisplaySize = { width: 140, height: 60 };
     this.stageLayer = null;
@@ -72,6 +81,7 @@ export default class LevelScene extends Phaser.Scene {
     this.coinIdCounter = 0;
     this.spikeIdCounter = 0;
     this.platformIdCounter = 0;
+    this.gapIdCounter = 0;
     this.spikeTiles = [];
     this.pauseMenu = null;
     this.pauseMenuButtons = { resume: null, quit: null };
@@ -102,6 +112,8 @@ export default class LevelScene extends Phaser.Scene {
     this.editorHoverId = null;
     this.editorHoverType = null;
     this.editorHitboxDrag = null;
+    this.editorGapDrag = null;
+    this.editorGapResize = null;
     this.editorPanning = false;
     this.editorPanStart = null;
     this.editorPanKey = null;
@@ -137,6 +149,16 @@ export default class LevelScene extends Phaser.Scene {
     this.groundGapRanges = [];
     this.spikeZones = [];
     this.safeGroundSegments = [];
+    this.baseGroundSegments = [];
+    this.gapHitboxes = [];
+    this.gapOverlays = [];
+    this.groundColliders = [];
+    this.stageTop = null;
+    this.stageHeight = null;
+    this.stageKey = null;
+    this.stageTileScaleX = 1;
+    this.stageTileScaleY = 1;
+    this.stageSegmentSprites = [];
     this.allCoinsCollected = false;
     this.goalWarningCooldown = 0;
     this.isLevelComplete = false;
@@ -146,6 +168,7 @@ export default class LevelScene extends Phaser.Scene {
     this.coinIdCounter = 0;
     this.spikeIdCounter = 0;
     this.platformIdCounter = 0;
+    this.gapIdCounter = 0;
     this.spikeTiles = [];
     this.isPauseMenuVisible = false;
     this.pauseMenu = null;
@@ -176,6 +199,8 @@ export default class LevelScene extends Phaser.Scene {
     this.editorHoverId = null;
     this.editorHoverType = null;
     this.editorHitboxDrag = null;
+    this.editorGapDrag = null;
+    this.editorGapResize = null;
     this.editorPanning = false;
     this.editorPanStart = null;
     this.editorPanKey = null;
@@ -283,6 +308,7 @@ export default class LevelScene extends Phaser.Scene {
       const stageTop = this.stageRect
         ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
         : worldHeight - 64;
+      this.stageTop = stageTop;
       const stageVisual = this.getStageVisualConfig();
       const stageKey = stageVisual.key;
       const stageTex = stageKey
@@ -292,6 +318,8 @@ export default class LevelScene extends Phaser.Scene {
         const texHeight =
           stageTex.height || stageTex.source?.[0]?.height || 64;
         const stageHeight = stageVisual.height ?? texHeight;
+        this.stageHeight = stageHeight;
+        this.stageKey = stageKey;
         this.stageImage = this.add
           .tileSprite(0, stageTop, worldWidth, stageHeight, stageKey)
           .setOrigin(0, 0)
@@ -301,10 +329,13 @@ export default class LevelScene extends Phaser.Scene {
         const tileScaleY =
           stageVisual.scaleY ??
           (texHeight ? stageHeight / texHeight : 1);
+        this.stageTileScaleX = tileScaleX;
+        this.stageTileScaleY = tileScaleY;
         this.stageImage.setTileScale(tileScaleX, tileScaleY);
         this.stageLayer.add(this.stageImage);
         if (this.groundGapRanges?.length && this.groundSegments?.length) {
           this.stageImage.setVisible(false);
+          this.stageSegmentSprites = [];
           this.groundSegments.forEach((segment) => {
             const segWidth = Math.round(segment.width || 0);
             if (segWidth < 16) return;
@@ -316,6 +347,7 @@ export default class LevelScene extends Phaser.Scene {
               .setScrollFactor(1, 1);
             segSprite.setTileScale(tileScaleX, tileScaleY);
             this.stageLayer.add(segSprite);
+            this.stageSegmentSprites.push(segSprite);
           });
         }
       }
@@ -356,6 +388,9 @@ export default class LevelScene extends Phaser.Scene {
             );
             this.physics.add.existing(hitbox, true);
             hitbox._gapKill = true;
+            const gapId = obj.gapId || `g${this.gapIdCounter++}`;
+            hitbox._gapId = gapId;
+            this.gapHitboxes.push(hitbox);
             this.hazards.add(hitbox);
             return;
           }
@@ -1432,7 +1467,9 @@ export default class LevelScene extends Phaser.Scene {
     chunk.displayHeight = height;
     chunk.setVisible(false);
     if (chunk.refreshBody) chunk.refreshBody();
+    chunk._groundSegment = true;
     this.platforms.add(chunk);
+    this.groundColliders.push(chunk);
   }
 
   createPlatformSurface({ x, y, width = 32, height = 16 }) {
@@ -2050,6 +2087,10 @@ export default class LevelScene extends Phaser.Scene {
       if (spike?._overrideId) spikeById.set(spike._overrideId, spike);
     });
 
+    if (overrides?.gaps?.length) {
+      this.applyGapOverrides(overrides.gaps, warnMissing);
+    }
+
     if (overrides?.coins?.length) {
       overrides.coins.forEach((entry) => {
         if (!entry) return;
@@ -2334,6 +2375,7 @@ export default class LevelScene extends Phaser.Scene {
       coins: this.mergeOverrideEntries(base?.coins, extra?.coins),
       platforms: this.mergeOverrideEntries(base?.platforms, extra?.platforms),
       spikes: this.mergeOverrideEntries(base?.spikes, extra?.spikes),
+      gaps: this.mergeOverrideEntries(base?.gaps, extra?.gaps),
     };
   }
 
@@ -2440,6 +2482,12 @@ export default class LevelScene extends Phaser.Scene {
     );
     this.editorButtons.platform = tools2.btnA;
     this.editorButtons.spike = tools2.btnB;
+    const gapBtn = this.createEditorButton(8, rowY, "Gap", () =>
+      this.setEditorTool("gap")
+    );
+    panel.add(gapBtn);
+    this.editorButtons.gap = gapBtn;
+    rowY += 22;
     rowPair("Delete", () => this.deleteSelectedEditorObject(), "Undo", () =>
       this.undoEditorAction()
     );
@@ -2590,6 +2638,7 @@ export default class LevelScene extends Phaser.Scene {
     registerCoins();
     registerPlatforms();
     registerSpikes();
+    this.refreshGapOverlays();
 
     this.input.on("gameobjectdown", (pointer, gameObject) => {
       if (!this.editorEnabled) return;
@@ -2610,6 +2659,11 @@ export default class LevelScene extends Phaser.Scene {
       if (!this.editorEnabled) return;
       if (this.isPointerOverEditorUi(pointer)) return;
       if (pointer.rightButtonDown?.()) {
+        const gapEdge = this.getEditorGapEdgeHit(pointer);
+        if (gapEdge) {
+          this.startEditorGapResize(pointer, gapEdge);
+          return;
+        }
         const hitTarget = (currentlyOver || []).find(
           (obj) => obj?._editorSurface && obj?._editorType === "platform"
         );
@@ -2626,10 +2680,17 @@ export default class LevelScene extends Phaser.Scene {
         return;
       }
       if (currentlyOver?.length) return;
+      if (this.editorTool === "gap") {
+        this.startEditorGapCreate(pointer);
+        return;
+      }
       if (!this.editorTool || this.editorTool === "select") {
         const hover = this.getEditorHoverInfo(pointer);
         if (hover?.object) {
           this.selectEditorObject(hover.type, hover.object);
+          if (hover.type === "gap" && pointer.leftButtonDown?.()) {
+            this.startEditorGapMove(pointer, hover.object);
+          }
           return;
         }
         this.clearEditorSelection();
@@ -2645,7 +2706,13 @@ export default class LevelScene extends Phaser.Scene {
 
     this.input.on("dragstart", (_pointer, gameObject) => {
       if (!this.editorEnabled || this.editorTool !== "select") return;
-      if (this.editorPanning || this.editorHitboxDrag) return;
+      if (
+        this.editorPanning ||
+        this.editorHitboxDrag ||
+        this.editorGapDrag ||
+        this.editorGapResize
+      )
+        return;
       const type = gameObject?._editorType;
       if (!type) return;
       if (type === "platform") {
@@ -2668,7 +2735,13 @@ export default class LevelScene extends Phaser.Scene {
 
     this.input.on("drag", (_pointer, gameObject, dragX, dragY) => {
       if (!this.editorEnabled || this.editorTool !== "select") return;
-      if (this.editorPanning || this.editorHitboxDrag) return;
+      if (
+        this.editorPanning ||
+        this.editorHitboxDrag ||
+        this.editorGapDrag ||
+        this.editorGapResize
+      )
+        return;
       const type = gameObject?._editorType;
       if (!type) return;
       if (type === "coin") {
@@ -2721,7 +2794,13 @@ export default class LevelScene extends Phaser.Scene {
 
     this.input.on("dragend", (_pointer, gameObject) => {
       if (!this.editorEnabled || this.editorTool !== "select") return;
-      if (this.editorPanning || this.editorHitboxDrag) return;
+      if (
+        this.editorPanning ||
+        this.editorHitboxDrag ||
+        this.editorGapDrag ||
+        this.editorGapResize
+      )
+        return;
       const type = gameObject?._editorType;
       if (!type || !this.editorDragStart) return;
       if (type === "platform") {
@@ -2769,13 +2848,23 @@ export default class LevelScene extends Phaser.Scene {
         this.updateEditorPanFromPointer(pointer);
         return;
       }
-      if (this.editorHitboxDrag) this.updateEditorHitboxDrag(pointer);
+      if (this.editorHitboxDrag) {
+        this.updateEditorHitboxDrag(pointer);
+        return;
+      }
+      if (this.editorGapResize) {
+        this.updateEditorGapResize(pointer);
+        return;
+      }
+      if (this.editorGapDrag) this.updateEditorGapDrag(pointer);
     });
 
     this.input.on("pointerup", () => {
       if (!this.editorEnabled) return;
       if (this.editorPanning) this.stopEditorPan();
       if (this.editorHitboxDrag) this.finishEditorHitboxDrag();
+      if (this.editorGapResize) this.finishEditorGapResize();
+      if (this.editorGapDrag) this.finishEditorGapDrag();
     });
   }
 
@@ -3076,6 +3165,610 @@ export default class LevelScene extends Phaser.Scene {
     this.updateEditorInspector();
   }
 
+  getGapOverlayMetrics() {
+    let top = Number.isFinite(this.stageTop) ? this.stageTop : null;
+    let height = Number.isFinite(this.stageHeight) ? this.stageHeight : null;
+    if (top == null || height == null) {
+      const base = (this.baseGroundSegments || [])[0];
+      if (base) {
+        if (top == null) top = base.y - (base.height || 0);
+        if (height == null) height = base.height || 64;
+      }
+    }
+    if (top == null) top = 0;
+    if (height == null) height = 64;
+    return { top, height };
+  }
+
+  refreshGapOverlays() {
+    (this.gapOverlays || []).forEach((overlay) => {
+      overlay?._label?.destroy?.();
+      overlay?.destroy?.();
+    });
+    this.gapOverlays = [];
+    if (!this.editorEnabled) return;
+    const gaps = this.groundGapRanges || [];
+    if (!gaps.length) {
+      this.applyEditorUiCameraFilters();
+      return;
+    }
+    const metrics = this.getGapOverlayMetrics();
+    gaps.forEach((gap) => {
+      const width = Math.max(1, gap.right - gap.left);
+      if (width < 1) return;
+      const overlay = this.add
+        .rectangle(gap.left, metrics.top, width, metrics.height, 0x4c88ff, 0.18)
+        .setOrigin(0, 0)
+        .setDepth(5997);
+      overlay.setStrokeStyle(2, 0x4c88ff, 0.85);
+      overlay._gapId = gap.id;
+      overlay._gapRange = gap;
+      const label = this.add
+        .text(gap.left + 4, metrics.top + 2, gap.id || "gap", {
+          fontSize: 12,
+          color: "#7fb2ff",
+          backgroundColor: "#0e1426",
+          padding: { x: 4, y: 2 },
+        })
+        .setDepth(6001)
+        .setVisible(false);
+      overlay._label = label;
+      this.gapOverlays.push(overlay);
+    });
+    this.applyEditorUiCameraFilters();
+    this.updateGapOverlayLabels();
+  }
+
+  updateGapOverlayLabels() {
+    if (!this.gapOverlays?.length) return;
+    const hoverId = this.editorHoverType === "gap" ? this.editorHoverId : null;
+    const selectedId =
+      this.editorSelection?.type === "gap" ? this.editorSelection.gap?.id : null;
+    this.gapOverlays.forEach((overlay) => {
+      const label = overlay?._label;
+      if (!label?.setVisible) return;
+      const show =
+        overlay._gapId && (overlay._gapId === hoverId || overlay._gapId === selectedId);
+      if (show) {
+        label.setText(overlay._gapId);
+        label.setPosition(overlay.x + 4, overlay.y + 2);
+      }
+      label.setVisible(show);
+    });
+  }
+
+  getEditorGapEdgeHit(pointer) {
+    const worldX = pointer?.worldX;
+    const worldY = pointer?.worldY;
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return null;
+    const margin = 6;
+    const overlays = this.gapOverlays || [];
+    for (let i = overlays.length - 1; i >= 0; i--) {
+      const overlay = overlays[i];
+      if (!overlay?.visible) continue;
+      const bounds = overlay.getBounds?.();
+      if (!bounds) continue;
+      if (
+        worldX >= bounds.x &&
+        worldX <= bounds.x + bounds.width &&
+        worldY >= bounds.y &&
+        worldY <= bounds.y + bounds.height
+      ) {
+        const edgeLeft = Math.abs(worldX - bounds.x) <= margin;
+        const edgeRight = Math.abs(worldX - (bounds.x + bounds.width)) <= margin;
+        if (edgeLeft || edgeRight) {
+          return {
+            gap: overlay._gapRange,
+            overlay,
+            edge: edgeLeft ? "left" : "right",
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  findBaseGroundSegmentAtX(x) {
+    const segments = this.baseGroundSegments || [];
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const left = segment.x;
+      const right = segment.x + (segment.width || 0);
+      if (x >= left && x <= right) return segment;
+    }
+    return null;
+  }
+
+  getGapEditBounds(segment, anchorX, gap) {
+    if (!segment) return null;
+    const segLeft = segment.x;
+    const segRight = segment.x + (segment.width || 0);
+    if (!Number.isFinite(segLeft) || !Number.isFinite(segRight)) return null;
+    let leftBound = segLeft;
+    let rightBound = segRight;
+    let leftNeighbor = null;
+    let rightNeighbor = null;
+    let anchorInsideGap = false;
+    (this.groundGapRanges || []).forEach((other) => {
+      if (!other || other === gap || other.id === gap?.id) return;
+      if (other.right <= segLeft || other.left >= segRight) return;
+      if (gap) {
+        if (other.right <= gap.left) {
+          if (leftNeighbor == null || other.right > leftNeighbor)
+            leftNeighbor = other.right;
+        }
+        if (other.left >= gap.right) {
+          if (rightNeighbor == null || other.left < rightNeighbor)
+            rightNeighbor = other.left;
+        }
+        return;
+      }
+      if (Number.isFinite(anchorX)) {
+        if (anchorX > other.left && anchorX < other.right) {
+          anchorInsideGap = true;
+          return;
+        }
+        if (other.right <= anchorX) {
+          if (leftNeighbor == null || other.right > leftNeighbor)
+            leftNeighbor = other.right;
+        }
+        if (other.left >= anchorX) {
+          if (rightNeighbor == null || other.left < rightNeighbor)
+            rightNeighbor = other.left;
+        }
+      }
+    });
+    if (anchorInsideGap) return null;
+    if (leftNeighbor != null) leftBound = Math.max(leftBound, leftNeighbor);
+    if (rightNeighbor != null) rightBound = Math.min(rightBound, rightNeighbor);
+    const safe = this.goalSafeRange;
+    const anchor = Number.isFinite(anchorX)
+      ? anchorX
+      : gap
+      ? gap.left + (gap.right - gap.left) * 0.5
+      : null;
+    if (safe && Number.isFinite(anchor)) {
+      if (anchor >= safe.left && anchor <= safe.right) return null;
+      if (anchor < safe.left) rightBound = Math.min(rightBound, safe.left);
+      if (anchor > safe.right) leftBound = Math.max(leftBound, safe.right);
+    }
+    if (rightBound - leftBound < GAP_MIN_WIDTH) return null;
+    return { left: leftBound, right: rightBound };
+  }
+
+  normalizeGapRange(left, right, bounds, snap) {
+    if (!bounds) return null;
+    let nextLeft = Math.min(left, right);
+    let nextRight = Math.max(left, right);
+    if (snap) {
+      nextLeft = this.snapValue(nextLeft);
+      nextRight = this.snapValue(nextRight);
+    } else {
+      nextLeft = Math.round(nextLeft);
+      nextRight = Math.round(nextRight);
+    }
+    if (nextLeft < bounds.left) nextLeft = bounds.left;
+    if (nextRight > bounds.right) nextRight = bounds.right;
+    if (nextRight - nextLeft < GAP_MIN_WIDTH) return null;
+    return { left: nextLeft, right: nextRight };
+  }
+
+  updateGapOverlayFromGap(overlay, gap) {
+    if (!overlay || !gap) return;
+    const metrics = this.getGapOverlayMetrics();
+    const width = Math.max(1, gap.right - gap.left);
+    if (overlay.setPosition) overlay.setPosition(gap.left, metrics.top);
+    if (overlay.setSize) overlay.setSize(width, metrics.height);
+    if (overlay._label?.setPosition)
+      overlay._label.setPosition(gap.left + 4, metrics.top + 2);
+  }
+
+  startEditorGapCreate(pointer) {
+    if (pointer.rightButtonDown?.()) return;
+    if (pointer.leftButtonDown && !pointer.leftButtonDown()) return;
+    const worldX = pointer?.worldX;
+    if (!Number.isFinite(worldX)) return;
+    const segment = this.findBaseGroundSegmentAtX(worldX);
+    if (!segment) return;
+    const bounds = this.getGapEditBounds(segment, worldX, null);
+    if (!bounds) return;
+    const metrics = this.getGapOverlayMetrics();
+    const preview = this.add
+      .rectangle(worldX, metrics.top, 1, metrics.height, 0x4c88ff, 0.18)
+      .setOrigin(0, 0)
+      .setDepth(5997);
+    preview.setStrokeStyle(2, 0x4c88ff, 0.85);
+    this.editorGapDrag = {
+      mode: "create",
+      startX: worldX,
+      bounds,
+      preview,
+    };
+    this.applyEditorUiCameraFilters();
+  }
+
+  startEditorGapMove(pointer, overlay) {
+    if (pointer.leftButtonDown && !pointer.leftButtonDown()) return;
+    const gap = overlay?._gapRange;
+    if (!gap) return;
+    const center = gap.left + (gap.right - gap.left) * 0.5;
+    const segment = this.findBaseGroundSegmentAtX(center);
+    const bounds = this.getGapEditBounds(segment, center, gap);
+    if (!bounds) return;
+    this.editorGapDrag = {
+      mode: "move",
+      gap,
+      overlay,
+      startX: pointer.worldX,
+      startLeft: gap.left,
+      startRight: gap.right,
+      width: gap.right - gap.left,
+      bounds,
+    };
+  }
+
+  startEditorGapResize(pointer, gapEdge) {
+    const gap = gapEdge?.gap;
+    const overlay = gapEdge?.overlay;
+    if (!gap || !overlay) return;
+    const center = gap.left + (gap.right - gap.left) * 0.5;
+    const segment = this.findBaseGroundSegmentAtX(center);
+    const bounds = this.getGapEditBounds(segment, center, gap);
+    if (!bounds) return;
+    this.editorGapResize = {
+      gap,
+      overlay,
+      edge: gapEdge.edge,
+      startX: pointer.worldX,
+      startLeft: gap.left,
+      startRight: gap.right,
+      bounds,
+    };
+    this.selectEditorObject("gap", overlay);
+  }
+
+  updateEditorGapDrag(pointer) {
+    const drag = this.editorGapDrag;
+    if (!drag) return;
+    if (drag.mode === "create") {
+      const currentX = pointer.worldX;
+      const bounds = drag.bounds;
+      let left = Math.min(drag.startX, currentX);
+      let right = Math.max(drag.startX, currentX);
+      if (this.editorSnap) {
+        left = this.snapValue(left);
+        right = this.snapValue(right);
+      } else {
+        left = Math.round(left);
+        right = Math.round(right);
+      }
+      if (left < bounds.left) left = bounds.left;
+      if (right > bounds.right) right = bounds.right;
+      if (right - left < GAP_MIN_WIDTH) {
+        if (left + GAP_MIN_WIDTH <= bounds.right) right = left + GAP_MIN_WIDTH;
+        else {
+          right = bounds.right;
+          left = right - GAP_MIN_WIDTH;
+        }
+      }
+      drag.currentLeft = left;
+      drag.currentRight = right;
+      if (drag.preview) {
+        const metrics = this.getGapOverlayMetrics();
+        drag.preview.setPosition(left, metrics.top);
+        drag.preview.setSize(right - left, metrics.height);
+      }
+      return;
+    }
+    if (drag.mode === "move") {
+      const dx = pointer.worldX - drag.startX;
+      let left = drag.startLeft + dx;
+      if (this.editorSnap) left = this.snapValue(left);
+      let width = drag.width;
+      const bounds = drag.bounds;
+      const maxWidth = bounds.right - bounds.left;
+      if (width > maxWidth) width = maxWidth;
+      let right = left + width;
+      if (left < bounds.left) {
+        left = bounds.left;
+        right = left + width;
+      }
+      if (right > bounds.right) {
+        right = bounds.right;
+        left = right - width;
+      }
+      drag.gap.left = Math.round(left);
+      drag.gap.right = Math.round(right);
+      drag.currentLeft = drag.gap.left;
+      drag.currentRight = drag.gap.right;
+      this.updateGapOverlayFromGap(drag.overlay, drag.gap);
+      this.updateEditorOutline();
+      this.updateEditorInspector();
+    }
+  }
+
+  updateEditorGapResize(pointer) {
+    const drag = this.editorGapResize;
+    if (!drag) return;
+    const dx = pointer.worldX - drag.startX;
+    let left = drag.startLeft;
+    let right = drag.startRight;
+    if (drag.edge === "left") left = drag.startLeft + dx;
+    if (drag.edge === "right") right = drag.startRight + dx;
+    if (this.editorSnap) {
+      left = this.snapValue(left);
+      right = this.snapValue(right);
+    } else {
+      left = Math.round(left);
+      right = Math.round(right);
+    }
+    const bounds = drag.bounds;
+    if (left < bounds.left) left = bounds.left;
+    if (right > bounds.right) right = bounds.right;
+    if (right - left < GAP_MIN_WIDTH) {
+      if (drag.edge === "left") left = right - GAP_MIN_WIDTH;
+      else right = left + GAP_MIN_WIDTH;
+    }
+    if (left < bounds.left) left = bounds.left;
+    if (right > bounds.right) right = bounds.right;
+    drag.gap.left = Math.round(left);
+    drag.gap.right = Math.round(right);
+    drag.currentLeft = drag.gap.left;
+    drag.currentRight = drag.gap.right;
+    this.updateGapOverlayFromGap(drag.overlay, drag.gap);
+    this.updateEditorOutline();
+    this.updateEditorInspector();
+  }
+
+  finishEditorGapDrag() {
+    const drag = this.editorGapDrag;
+    if (!drag) return;
+    if (drag.mode === "create") {
+      drag.preview?.destroy?.();
+      const left = drag.currentLeft;
+      const right = drag.currentRight;
+      if (Number.isFinite(left) && Number.isFinite(right)) {
+        const bounds = drag.bounds;
+        const normalized = this.normalizeGapRange(left, right, bounds, false);
+        if (normalized) {
+          const gapId = `g${this.gapIdCounter++}`;
+          const newGap = {
+            id: gapId,
+            left: normalized.left,
+            right: normalized.right,
+          };
+          this.groundGapRanges = (this.groundGapRanges || []).concat(newGap);
+          this.recordEditorOverride("gaps", {
+            id: gapId,
+            add: true,
+            x: newGap.left,
+            width: newGap.right - newGap.left,
+          });
+          this.rebuildGroundFromGaps();
+          const overlay = (this.gapOverlays || []).find(
+            (entry) => entry?._gapId === gapId
+          );
+          if (overlay) this.selectEditorObject("gap", overlay);
+          this.pushEditorHistory();
+        }
+      }
+      this.editorGapDrag = null;
+      return;
+    }
+    if (drag.mode === "move") {
+      const gap = drag.gap;
+      const changed =
+        gap.left !== drag.startLeft || gap.right !== drag.startRight;
+      const gapId = gap.id;
+      if (changed && gapId) {
+        this.recordEditorOverride("gaps", {
+          id: gapId,
+          x: gap.left,
+          width: gap.right - gap.left,
+        });
+        this.rebuildGroundFromGaps();
+        const overlay = (this.gapOverlays || []).find(
+          (entry) => entry?._gapId === gapId
+        );
+        if (overlay) this.selectEditorObject("gap", overlay);
+        this.pushEditorHistory();
+      }
+      this.editorGapDrag = null;
+    }
+  }
+
+  finishEditorGapResize() {
+    const drag = this.editorGapResize;
+    if (!drag) return;
+    const gap = drag.gap;
+    const changed =
+      gap.left !== drag.startLeft || gap.right !== drag.startRight;
+    const gapId = gap.id;
+    if (changed && gapId) {
+      this.recordEditorOverride("gaps", {
+        id: gapId,
+        x: gap.left,
+        width: gap.right - gap.left,
+      });
+      this.rebuildGroundFromGaps();
+      const overlay = (this.gapOverlays || []).find(
+        (entry) => entry?._gapId === gapId
+      );
+      if (overlay) this.selectEditorObject("gap", overlay);
+      this.pushEditorHistory();
+    }
+    this.editorGapResize = null;
+  }
+
+  rebuildGroundFromGaps() {
+    const gaps = (this.groundGapRanges || [])
+      .filter((gap) => gap && gap.right > gap.left)
+      .sort((a, b) => a.left - b.left);
+    let maxGapId = -1;
+    gaps.forEach((gap) => {
+      if (!gap.id) gap.id = `g${this.gapIdCounter++}`;
+      const match = /^g(\d+)$/.exec(gap.id);
+      if (match) maxGapId = Math.max(maxGapId, Number(match[1]));
+    });
+    if (maxGapId >= 0) {
+      this.gapIdCounter = Math.max(this.gapIdCounter, maxGapId + 1);
+    }
+    this.groundGapRanges = gaps;
+    (this.gapHitboxes || []).forEach((hitbox) => {
+      if (this.hazards?.remove) this.hazards.remove(hitbox, true, true);
+      else hitbox?.destroy?.();
+    });
+    this.gapHitboxes = [];
+    const worldHeight = this.physics.world.bounds.height;
+    const gapTop = Math.round((this.stageTop ?? 0) + 8);
+    gaps.forEach((gap) => {
+      const width = gap.right - gap.left;
+      if (width < 16) return;
+      const gapLeft = Math.round(gap.left);
+      const gapHeight = Math.max(16, Math.round(worldHeight - gapTop));
+      const hitbox = this.add.rectangle(
+        gapLeft + width * 0.5,
+        gapTop + gapHeight * 0.5,
+        width,
+        gapHeight,
+        0xd64545,
+        0
+      );
+      this.physics.add.existing(hitbox, true);
+      hitbox._gapKill = true;
+      hitbox._gapId = gap.id;
+      this.gapHitboxes.push(hitbox);
+      this.hazards.add(hitbox);
+    });
+    (this.groundColliders || []).forEach((collider) => {
+      if (this.platforms?.remove) this.platforms.remove(collider, true, true);
+      else collider?.destroy?.();
+    });
+    this.groundColliders = [];
+    this.groundSegments = [];
+    let nextId = 0;
+    (this.baseGroundSegments || []).forEach((segment) => {
+      const split = this.splitGroundWithGaps(segment, gaps, nextId);
+      nextId = split.nextId;
+      split.segments.forEach((seg) => {
+        this.createStageSegment(seg);
+        this.groundSegments.push({
+          left: seg.x,
+          right: seg.x + (seg.width || 0),
+          width: seg.width || 0,
+          height: seg.height || 0,
+          top: seg.y - (seg.height || 0),
+        });
+      });
+    });
+    this.safeGroundSegments = this.buildSafeGroundSegments(
+      this.groundSegments,
+      this.spikeZones
+    );
+    if (this.stageSegmentSprites?.length) {
+      this.stageSegmentSprites.forEach((sprite) => sprite?.destroy?.());
+      this.stageSegmentSprites = [];
+    }
+    if (this.stageImage) {
+      if (!gaps.length) {
+        this.stageImage.setVisible(true);
+      } else {
+        this.stageImage.setVisible(false);
+        const metrics = this.getGapOverlayMetrics();
+        const tileScaleX = this.stageTileScaleX ?? 1;
+        const tileScaleY = this.stageTileScaleY ?? 1;
+        this.groundSegments.forEach((segment) => {
+          const segWidth = Math.round(segment.width || 0);
+          if (segWidth < 16) return;
+          const segLeft = Math.round(segment.left ?? segment.x ?? 0);
+          const segSprite = this.add
+            .tileSprite(segLeft, metrics.top, segWidth, metrics.height, this.stageKey)
+            .setOrigin(0, 0)
+            .setDepth(0)
+            .setScrollFactor(1, 1);
+          segSprite.setTileScale(tileScaleX, tileScaleY);
+          this.stageLayer?.add?.(segSprite);
+          this.stageSegmentSprites.push(segSprite);
+        });
+      }
+    }
+    if (this.editorEnabled) this.refreshGapOverlays();
+    this.applyEditorUiCameraFilters();
+  }
+
+  applyGapOverrides(entries, warnMissing) {
+    if (!entries?.length) return false;
+    const gapRanges = (this.groundGapRanges || []).slice();
+    const gapById = new Map();
+    gapRanges.forEach((gap) => {
+      if (gap?.id) gapById.set(gap.id, gap);
+    });
+    let changed = false;
+    entries.forEach((entry) => {
+      if (!entry) return;
+      const id = entry.id;
+      const target = id ? gapById.get(id) : null;
+      const wantsAdd = entry.add === true;
+      if (!target) {
+        if (!wantsAdd && id) {
+          if (warnMissing) warnMissing("gap", id);
+          return;
+        }
+        const x = Number.isFinite(entry.x) ? entry.x : null;
+        const width = Number.isFinite(entry.width) ? entry.width : null;
+        if (x == null || width == null) return;
+        const left = x;
+        const right = x + width;
+        const anchor = left + width * 0.5;
+        const segment = this.findBaseGroundSegmentAtX(anchor);
+        const bounds = this.getGapEditBounds(segment, anchor, null);
+        const normalized = this.normalizeGapRange(left, right, bounds, false);
+        if (!normalized) return;
+        const gapId = id || `g${this.gapIdCounter++}`;
+        const gap = { id: gapId, left: normalized.left, right: normalized.right };
+        gapRanges.push(gap);
+        gapById.set(gapId, gap);
+        changed = true;
+        return;
+      }
+      if (entry.remove) {
+        const index = gapRanges.indexOf(target);
+        if (index >= 0) gapRanges.splice(index, 1);
+        gapById.delete(id);
+        changed = true;
+        return;
+      }
+      let left = target.left;
+      let right = target.right;
+      if (Number.isFinite(entry.x)) {
+        left = entry.x;
+        const nextWidth = Number.isFinite(entry.width)
+          ? entry.width
+          : right - target.left;
+        right = left + nextWidth;
+      } else if (Number.isFinite(entry.width)) {
+        right = left + entry.width;
+      }
+      if (Number.isFinite(entry.dx)) {
+        left += entry.dx;
+        right += entry.dx;
+      }
+      const anchor = target.left + (target.right - target.left) * 0.5;
+      const segment = this.findBaseGroundSegmentAtX(anchor);
+      const bounds = this.getGapEditBounds(segment, anchor, target);
+      const normalized = this.normalizeGapRange(left, right, bounds, false);
+      if (!normalized) return;
+      target.left = normalized.left;
+      target.right = normalized.right;
+      changed = true;
+    });
+    if (changed) {
+      this.groundGapRanges = gapRanges;
+      this.rebuildGroundFromGaps();
+    }
+    return changed;
+  }
+
   snapValue(value) {
     return Math.round(value / EDITOR_GRID_SIZE) * EDITOR_GRID_SIZE;
   }
@@ -3089,6 +3782,20 @@ export default class LevelScene extends Phaser.Scene {
     } else if (type === "spike") {
       const hitbox = gameObject._editorSpike;
       this.editorSelection = { type, sprite: gameObject, hitbox };
+    } else if (type === "gap") {
+      const gap =
+        gameObject?._gapRange ||
+        (gameObject?._gapId
+          ? (this.groundGapRanges || []).find(
+              (entry) => entry.id === gameObject._gapId
+            )
+          : null);
+      if (!gap) return;
+      const overlay =
+        gameObject?._gapRange && gameObject.getBounds
+          ? gameObject
+          : (this.gapOverlays || []).find((entry) => entry?._gapId === gap.id);
+      this.editorSelection = { type, gap, overlay };
     } else if (type === "coin") {
       this.editorSelection = { type, sprite: gameObject };
     }
@@ -3100,6 +3807,7 @@ export default class LevelScene extends Phaser.Scene {
     this.editorSelection = null;
     if (this.editorOutline) this.editorOutline.setVisible(false);
     this.updateEditorInspector();
+    this.updateGapOverlayLabels();
   }
 
   updateEditorOutline() {
@@ -3120,6 +3828,15 @@ export default class LevelScene extends Phaser.Scene {
         width: selection.surface.width,
         height: selection.surface.height,
       };
+    } else if (selection.type === "gap") {
+      const gap = selection.gap;
+      const metrics = this.getGapOverlayMetrics();
+      bounds = {
+        x: gap.left,
+        y: metrics.top,
+        width: gap.right - gap.left,
+        height: metrics.height,
+      };
     } else if (selection.sprite?.getBounds) {
       bounds = selection.sprite.getBounds();
     }
@@ -3127,6 +3844,7 @@ export default class LevelScene extends Phaser.Scene {
     this.editorOutline.setPosition(bounds.x, bounds.y);
     this.editorOutline.setSize(bounds.width, bounds.height);
     this.editorOutline.setVisible(true);
+    this.updateGapOverlayLabels();
   }
 
   updateEditorInspector() {
@@ -3155,6 +3873,16 @@ export default class LevelScene extends Phaser.Scene {
       );
       return;
     }
+    if (type === "gap") {
+      const gap = this.editorSelection.gap;
+      const width = gap.right - gap.left;
+      label.setText(
+        `${gap.id || "gap"} gap x=${Math.round(gap.left)} w=${Math.round(
+          width
+        )}`
+      );
+      return;
+    }
     if (type === "coin") {
       const sprite = this.editorSelection.sprite;
       label.setText(
@@ -3179,6 +3907,7 @@ export default class LevelScene extends Phaser.Scene {
     const hover = this.getEditorHoverInfo(pointer);
     this.editorHoverId = hover?.id || null;
     this.editorHoverType = hover?.type || null;
+    this.updateGapOverlayLabels();
     const hoverLabel = hover
       ? `${hover.id || "?"} ${hover.type}`
       : "none";
@@ -3268,6 +3997,15 @@ export default class LevelScene extends Phaser.Scene {
         return { type: "platform", id: surface.overrideId, object: target };
       }
     }
+    const gapOverlays = this.gapOverlays || [];
+    for (let i = gapOverlays.length - 1; i >= 0; i--) {
+      const overlay = gapOverlays[i];
+      if (!overlay?.visible) continue;
+      const bounds = overlay.getBounds?.();
+      if (bounds && contains(worldX, worldY, bounds)) {
+        return { type: "gap", id: overlay._gapId, object: overlay };
+      }
+    }
     return null;
   }
 
@@ -3300,7 +4038,7 @@ export default class LevelScene extends Phaser.Scene {
     const key = seedKey || levelKey || levelAlias;
     if (!key) return null;
     if (!this.editorOverrides[key]) {
-      this.editorOverrides[key] = { coins: [], platforms: [], spikes: [] };
+      this.editorOverrides[key] = { coins: [], platforms: [], spikes: [], gaps: [] };
     }
     return this.editorOverrides[key];
   }
@@ -3535,6 +4273,18 @@ export default class LevelScene extends Phaser.Scene {
       this.pushEditorHistory();
       return;
     }
+    if (this.editorSelection.type === "gap") {
+      const gap = this.editorSelection.gap;
+      const id = gap?.id;
+      if (id) this.recordEditorOverride("gaps", { id, remove: true });
+      this.groundGapRanges = (this.groundGapRanges || []).filter(
+        (entry) => entry !== gap && entry.id !== id
+      );
+      this.clearEditorSelection();
+      this.rebuildGroundFromGaps();
+      this.pushEditorHistory();
+      return;
+    }
     if (this.editorSelection.type === "spike") {
       const hitbox = this.editorSelection.hitbox;
       const sprite = this.editorSelection.sprite;
@@ -3684,6 +4434,12 @@ export default class LevelScene extends Phaser.Scene {
       });
       return best;
     };
+    const baseGroundSegments = stageGround.map((segment) => ({
+      x: segment.x,
+      y: segment.y,
+      width: segment.width || 0,
+      height: segment.height || 0,
+    }));
 
     if (platformCandidates.length) {
       const sortedPlatforms = platformCandidates
@@ -3736,6 +4492,14 @@ export default class LevelScene extends Phaser.Scene {
         (gap) => !overlapsGoalSafe(gap.left, gap.right)
       );
     }
+    groundGaps = groundGaps
+      .slice()
+      .sort((a, b) => a.left - b.left)
+      .map((gap, index) => ({
+        ...gap,
+        id: gap.id || `g${index}`,
+      }));
+    this.gapIdCounter = groundGaps.length;
     let spikeZones = this.buildSpikeZones(platforms, groundGaps);
     if (goalSafeLeft != null) {
       spikeZones = spikeZones.filter(
@@ -3824,6 +4588,68 @@ export default class LevelScene extends Phaser.Scene {
       nextObjects.push(obj);
     });
 
+    const levelKey = this.levelId != null ? String(this.levelId) : null;
+    const levelStretch =
+      levelKey && Number.isFinite(LEVEL_END_STRETCH_BY_LEVEL[levelKey])
+        ? LEVEL_END_STRETCH_BY_LEVEL[levelKey]
+        : LEVEL_END_STRETCH;
+    const endStretch = Math.max(0, Math.round(levelStretch / 16) * 16);
+    if (endStretch > 0) {
+      let lastGround = null;
+      let lastRight = -Infinity;
+      nextObjects.forEach((obj) => {
+        if (obj.type !== "ground") return;
+        if (this.isFloatingPlatform(obj)) return;
+        const right = (obj.x || 0) + (obj.width || 0);
+        if (right > lastRight) {
+          lastRight = right;
+          lastGround = obj;
+        }
+      });
+      const lastSegment = this.groundSegments.reduce((best, segment) => {
+        if (!best || segment.right > best.right) return segment;
+        return best;
+      }, null);
+      if (lastGround) {
+        const nextWidth = Math.max(
+          16,
+          Math.round((lastGround.width || 0) + endStretch)
+        );
+        lastGround.width = nextWidth;
+      }
+      if (lastSegment) {
+        const nextWidth = Math.max(
+          16,
+          Math.round((lastSegment.width || 0) + endStretch)
+        );
+        lastSegment.width = nextWidth;
+        lastSegment.right = lastSegment.left + nextWidth;
+      }
+      const lastBase = baseGroundSegments.reduce((best, segment) => {
+        const right = (segment.x || 0) + (segment.width || 0);
+        if (!best || right > best.right) {
+          return { segment, right };
+        }
+        return best;
+      }, null);
+      if (lastBase?.segment) {
+        lastBase.segment.width = Math.max(
+          16,
+          Math.round((lastBase.segment.width || 0) + endStretch)
+        );
+      }
+      const goalObj = nextObjects.find((obj) => obj.type === "goal");
+      if (goalObj) {
+        goalObj.x = Math.round((goalObj.x || 0) + endStretch);
+        if (this.goalSafeRange) {
+          this.goalSafeRange = {
+            left: this.goalSafeRange.left + endStretch,
+            right: this.goalSafeRange.right + endStretch,
+          };
+        }
+      }
+    }
+
     spikeZones.forEach((zone) => {
       const width = zone.right - zone.left;
       if (width <= 0) return;
@@ -3848,6 +4674,7 @@ export default class LevelScene extends Phaser.Scene {
         y: 0,
         width,
         height: 16,
+        gapId: gap.id,
       });
     });
 
@@ -3855,6 +4682,7 @@ export default class LevelScene extends Phaser.Scene {
       this.groundSegments,
       spikeZones
     );
+    this.baseGroundSegments = baseGroundSegments;
 
     return nextObjects;
   }
