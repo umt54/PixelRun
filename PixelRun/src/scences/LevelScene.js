@@ -8,6 +8,11 @@ const PLATFORM_Y_OFFSET = 40;
 const SPLIT_DISTANCE_ON = 520;
 const SPLIT_DISTANCE_OFF = 420;
 const REACTION_DISTANCE = 64;
+const COIN_X_OFFSET = 0;
+const COIN_Y_OFFSET = 0;
+const SPIKE_ZONE_X_OFFSET = 0;
+const SPIKE_ZONE_WIDTH_SCALE = 1;
+const GOAL_SAFE_BUFFER = 192;
 
 
 export default class LevelScene extends Phaser.Scene {
@@ -1426,17 +1431,23 @@ export default class LevelScene extends Phaser.Scene {
     const coinTex = this.textures.get("coin")?.getSourceImage?.();
     const baseCoinHeight = coinTex?.height || 16;
 
+    let platformCoinSources = 0;
     this.platformSurfaces.forEach((surface) => {
+      platformCoinSources += 1;
       const offsets = this.coinOffsetsForWidth(surface.width);
       offsets.forEach((offset) => {
         if (surface.left == null || surface.top == null) return;
-        const coinX = surface.left + offset;
+        const surfaceRight =
+          surface.right ?? surface.left + (surface.width || 0);
+        let coinX = surface.left + offset + COIN_X_OFFSET;
+        if (coinX < surface.left + 8) coinX = surface.left + 8;
+        if (coinX > surfaceRight - 8) coinX = surfaceRight - 8;
         const coin = this.physics.add
           .staticImage(coinX, surface.top, "coin")
           .setDepth(40)
           .setVisible(true);
         const coinHeight = coin.displayHeight || coin.height || baseCoinHeight;
-        coin.setY(surface.top - coinHeight * 0.5 - 30);
+        coin.setY(surface.top - coinHeight * 0.5 - 30 - COIN_Y_OFFSET);
         if (coin.body?.updateFromGameObject) coin.body.updateFromGameObject();
         this.coinLayer?.add?.(coin);
         this.coins.add(coin);
@@ -1445,14 +1456,28 @@ export default class LevelScene extends Phaser.Scene {
     const stageTop = this.stageRect
       ? Math.round(this.stageRect.y - (this.stageRect.height || 0))
       : Math.round(this.cameras.main.height - 64);
+    let totalCoins = this.getRemainingActiveCoins();
     const groundSegments = this.groundSegments || [];
     const spikeZones = this.spikeZones || [];
     const gapRanges = this.groundGapRanges || [];
-    const extraCoinsMax = 6;
+    const goalSafeRange = this.goalSafeRange;
+    const isInGoalSafeZone = (x) =>
+      goalSafeRange && x >= goalSafeRange.left && x <= goalSafeRange.right;
+    const obstacleCoinSources =
+      spikeZones.length + gapRanges.length + platformCoinSources;
+    const minCoinTarget = Phaser.Math.Clamp(
+      Math.floor(obstacleCoinSources * 1.2),
+      12,
+      28
+    );
+    const extraCoinsMax = Math.max(
+      24,
+      minCoinTarget,
+      obstacleCoinSources * 2
+    );
+    const minBaseCoins = 12;
     let extraCoins = 0;
     let groundCoinPlaced = false;
-    let spikeCoinPlaced = false;
-    let gapCoinPlaced = false;
 
     const isInSpikeZone = (x) =>
       spikeZones.some((zone) => x >= zone.left + 8 && x <= zone.right - 8);
@@ -1469,8 +1494,8 @@ export default class LevelScene extends Phaser.Scene {
     const jumpDistanceLimit = Math.max(96, maxJumpDistanceRaw - 24);
     const hazardRunup = 64;
     const hazardClearance = 32;
-    const hazardCoinOffset = 60;
-    const groundCoinOffset = 36;
+    const hazardCoinOffset = 60 + COIN_Y_OFFSET;
+    const groundCoinOffset = 36 + COIN_Y_OFFSET;
     const safeGroundSegments = this.safeGroundSegments || [];
     const platformSurfaces = this.platformSurfaces || [];
     const safeSurfaces = safeGroundSegments
@@ -1570,6 +1595,7 @@ export default class LevelScene extends Phaser.Scene {
       this.coinLayer?.add?.(coin);
       this.coins.add(coin);
       extraCoins += 1;
+      totalCoins += 1;
       return true;
     };
 
@@ -1621,15 +1647,50 @@ export default class LevelScene extends Phaser.Scene {
       return false;
     };
 
-    spikeZones.forEach((zone, index) => {
+    const placePreHazardCoin = (hazardLeft) => {
+      const runwayLeft = hazardLeft - REACTION_DISTANCE;
+      const runwayRight = hazardLeft - 16;
+      if (runwayRight <= runwayLeft) return false;
+      for (let i = 0; i < safeGroundSegments.length; i++) {
+        const segment = safeGroundSegments[i];
+        if (segment.right <= runwayLeft) continue;
+        if (segment.left >= runwayRight) continue;
+        const segLeft = Math.max(segment.left, runwayLeft);
+        const segRight = Math.min(segment.right, runwayRight);
+        if (segRight - segLeft < 16) continue;
+        const candidates = [segRight - 8, segRight - 24, segRight - 40]
+          .map((x) => x + COIN_X_OFFSET)
+          .filter((x) => x >= segLeft + 8 && x <= segRight - 8)
+          .filter((x) => !isInGoalSafeZone(x));
+        if (!candidates.length) continue;
+        if (tryPlaceCoin(candidates, segment.top, groundCoinOffset, false, true))
+          return true;
+      }
+      return false;
+    };
+
+    spikeZones.forEach((zone) => {
+      if (extraCoins >= extraCoinsMax) return;
+      placePreHazardCoin(zone.left);
+    });
+
+    gapRanges.forEach((gap) => {
+      if (extraCoins >= extraCoinsMax) return;
+      placePreHazardCoin(gap.left);
+    });
+
+    const spikeZonesOrdered = spikeZones
+      .slice()
+      .sort((a, b) => (b.followUp ? 1 : 0) - (a.followUp ? 1 : 0));
+    spikeZonesOrdered.forEach((zone) => {
       if (extraCoins >= extraCoinsMax) return;
       const width = zone.right - zone.left;
       if (width < 16) return;
-      if (index % 2 !== 0 && spikeCoinPlaced) return;
       const center = zone.left + width * 0.5;
-      const candidates = [center, center - 16, center + 16].filter(
-        (x) => x >= zone.left + 8 && x <= zone.right - 8
-      );
+      const candidates = [center, center - 16, center + 16]
+        .map((x) => x + COIN_X_OFFSET)
+        .filter((x) => x >= zone.left + 8 && x <= zone.right - 8)
+        .filter((x) => !isInGoalSafeZone(x));
       if (
         tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
           left: zone.left,
@@ -1637,18 +1698,18 @@ export default class LevelScene extends Phaser.Scene {
           clearance: hazardClearance,
         })
       )
-        spikeCoinPlaced = true;
+        return;
     });
 
-    gapRanges.forEach((gap, index) => {
+    gapRanges.forEach((gap) => {
       if (extraCoins >= extraCoinsMax) return;
       const width = gap.right - gap.left;
       if (width < 16) return;
-      if (index % 2 !== 0 && gapCoinPlaced) return;
       const center = gap.left + width * 0.5;
-      const candidates = [center, center - 16, center + 16].filter(
-        (x) => x >= gap.left + 8 && x <= gap.right - 8
-      );
+      const candidates = [center, center - 16, center + 16]
+        .map((x) => x + COIN_X_OFFSET)
+        .filter((x) => x >= gap.left + 8 && x <= gap.right - 8)
+        .filter((x) => !isInGoalSafeZone(x));
       if (
         tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
           left: gap.left,
@@ -1656,24 +1717,109 @@ export default class LevelScene extends Phaser.Scene {
           clearance: hazardClearance,
         })
       )
-        gapCoinPlaced = true;
+        return;
     });
 
-    groundSegments.forEach((segment, index) => {
-      if (extraCoins >= extraCoinsMax) return;
-      const width = segment.width || 0;
-      if (width < 160) return;
-      if (index % 2 !== 0 && groundCoinPlaced) return;
-      const center = segment.left + width * 0.5;
-      const candidates = [
-        center,
-        segment.left + width * 0.35,
-        segment.left + width * 0.65,
-      ].filter((x) => !isInSpikeZone(x));
-      if (!candidates.length) return;
-      if (tryPlaceCoin(candidates, stageTop, groundCoinOffset, false, true))
-        groundCoinPlaced = true;
-    });
+    const allowGroundCoins = false;
+    if (allowGroundCoins) {
+      groundSegments.forEach((segment, index) => {
+        if (extraCoins >= extraCoinsMax) return;
+        const width = segment.width || 0;
+        if (width < 160) return;
+        if (index % 2 !== 0 && groundCoinPlaced) return;
+        const center = segment.left + width * 0.5;
+        const candidates = [
+          center,
+          segment.left + width * 0.35,
+          segment.left + width * 0.65,
+        ].filter((x) => !isInSpikeZone(x));
+        if (!candidates.length) return;
+        if (tryPlaceCoin(candidates, stageTop, groundCoinOffset, false, true))
+          groundCoinPlaced = true;
+      });
+    }
+    if (totalCoins < minBaseCoins) {
+      const extraOffsets = [0, -16, 16, -32, 32];
+      spikeZones.forEach((zone) => {
+        if (extraCoins >= extraCoinsMax) return;
+        if (totalCoins >= minBaseCoins) return;
+        const width = zone.right - zone.left;
+        if (width < 16) return;
+        const center = zone.left + width * 0.5;
+        const candidates = extraOffsets
+          .map((offset) => center + offset + COIN_X_OFFSET)
+          .filter((x) => x >= zone.left + 8 && x <= zone.right - 8)
+          .filter((x) => !isInGoalSafeZone(x));
+        if (
+          tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
+            left: zone.left,
+            right: zone.right,
+            clearance: hazardClearance,
+          })
+        )
+          return;
+      });
+      gapRanges.forEach((gap) => {
+        if (extraCoins >= extraCoinsMax) return;
+        if (totalCoins >= minBaseCoins) return;
+        const width = gap.right - gap.left;
+        if (width < 16) return;
+        const center = gap.left + width * 0.5;
+        const candidates = extraOffsets
+          .map((offset) => center + offset + COIN_X_OFFSET)
+          .filter((x) => x >= gap.left + 8 && x <= gap.right - 8)
+          .filter((x) => !isInGoalSafeZone(x));
+        if (
+          tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
+            left: gap.left,
+            right: gap.right,
+            clearance: hazardClearance,
+          })
+        )
+          return;
+      });
+    }
+    if (totalCoins < minCoinTarget) {
+      const extraOffsets = [0, -16, 16, -32, 32];
+      spikeZones.forEach((zone) => {
+        if (extraCoins >= extraCoinsMax) return;
+        if (totalCoins >= minCoinTarget) return;
+        const width = zone.right - zone.left;
+        if (width < 16) return;
+        const center = zone.left + width * 0.5;
+        const candidates = extraOffsets
+          .map((offset) => center + offset + COIN_X_OFFSET)
+          .filter((x) => x >= zone.left + 8 && x <= zone.right - 8)
+          .filter((x) => !isInGoalSafeZone(x));
+        if (
+          tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
+            left: zone.left,
+            right: zone.right,
+            clearance: hazardClearance,
+          })
+        )
+          return;
+      });
+      gapRanges.forEach((gap) => {
+        if (extraCoins >= extraCoinsMax) return;
+        if (totalCoins >= minCoinTarget) return;
+        const width = gap.right - gap.left;
+        if (width < 16) return;
+        const center = gap.left + width * 0.5;
+        const candidates = extraOffsets
+          .map((offset) => center + offset + COIN_X_OFFSET)
+          .filter((x) => x >= gap.left + 8 && x <= gap.right - 8)
+          .filter((x) => !isInGoalSafeZone(x));
+        if (
+          tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
+            left: gap.left,
+            right: gap.right,
+            clearance: hazardClearance,
+          })
+        )
+          return;
+      });
+    }
     const activeCoins = this.getRemainingActiveCoins();
     this.levelCoinTotal = activeCoins;
     this.levelCoinsCollected = 0;
@@ -1758,8 +1904,76 @@ export default class LevelScene extends Phaser.Scene {
       });
     }
 
-    const groundGaps = this.buildGroundGapRanges(stageGround, spawn, goal, platforms);
-    const spikeZones = this.buildSpikeZones(platforms, groundGaps);
+    let groundGaps = this.buildGroundGapRanges(stageGround, spawn, goal, platforms);
+    const goalSafeLeft = goal
+      ? Math.round((goal.x || 0) - GOAL_SAFE_BUFFER)
+      : null;
+    const goalSafeRight = goal
+      ? Math.round((goal.x || 0) + (goal.width || 0) + GOAL_SAFE_BUFFER)
+      : null;
+    const overlapsGoalSafe = (left, right) =>
+      goalSafeLeft != null && right > goalSafeLeft && left < goalSafeRight;
+    if (goalSafeLeft != null) {
+      groundGaps = groundGaps.filter(
+        (gap) => !overlapsGoalSafe(gap.left, gap.right)
+      );
+    }
+    let spikeZones = this.buildSpikeZones(platforms, groundGaps);
+    if (goalSafeLeft != null) {
+      spikeZones = spikeZones.filter(
+        (zone) => !overlapsGoalSafe(zone.left, zone.right)
+      );
+    }
+    this.goalSafeRange =
+      goalSafeLeft != null ? { left: goalSafeLeft, right: goalSafeRight } : null;
+    const followUpZones = [];
+    const followUpWidth = Math.round((96 * SPIKE_ZONE_WIDTH_SCALE) / 16) * 16;
+    const minFollowUpWidth = 48;
+    const groundRuns = [];
+    stageGround.forEach((segment) => {
+      const split = this.splitGroundWithGaps(segment, groundGaps, 0);
+      split.segments.forEach((seg) => {
+        groundRuns.push({
+          left: seg.x,
+          right: seg.x + (seg.width || 0),
+        });
+      });
+    });
+    const findRunForX = (x) => {
+      for (let i = 0; i < groundRuns.length; i++) {
+        const run = groundRuns[i];
+        if (x >= run.left && x < run.right) return { run, index: i };
+      }
+      return null;
+    };
+    const overlapsHazard = (left, right) =>
+      groundGaps.some((gap) => right > gap.left && left < gap.right) ||
+      spikeZones.some((zone) => right > zone.left && left < zone.right) ||
+      followUpZones.some((zone) => right > zone.left && left < zone.right);
+    const addFollowUpZone = (triggerX) => {
+      const found = findRunForX(triggerX);
+      if (!found) return;
+      let zoneLeft = Math.ceil((triggerX + REACTION_DISTANCE) / 16) * 16;
+      const runRight = found.run.right;
+      if (zoneLeft < found.run.left + REACTION_DISTANCE) {
+        zoneLeft = Math.ceil((found.run.left + REACTION_DISTANCE) / 16) * 16;
+      }
+      zoneLeft = Math.round((zoneLeft + SPIKE_ZONE_X_OFFSET) / 16) * 16;
+      if (zoneLeft < found.run.left + REACTION_DISTANCE) {
+        zoneLeft = Math.ceil((found.run.left + REACTION_DISTANCE) / 16) * 16;
+      }
+      let zoneRight = zoneLeft + followUpWidth;
+      if (zoneRight > runRight) zoneRight = runRight;
+      if (zoneRight - zoneLeft < minFollowUpWidth) return;
+      if (overlapsGoalSafe(zoneLeft, zoneRight)) return;
+      if (overlapsHazard(zoneLeft, zoneRight)) return;
+      followUpZones.push({ left: zoneLeft, right: zoneRight, followUp: true });
+    };
+    groundGaps.forEach((gap) => addFollowUpZone(gap.right));
+    platforms.forEach((platform) =>
+      addFollowUpZone(platform.x + (platform.width || 0))
+    );
+    if (followUpZones.length) spikeZones = spikeZones.concat(followUpZones);
     this.groundGapRanges = groundGaps;
     this.spikeZones = spikeZones;
     this.groundSegments = [];
@@ -1911,8 +2125,10 @@ export default class LevelScene extends Phaser.Scene {
       if (gap < MIN_GAP || gap > MAX_GAP) continue;
       const maxBuffer = Math.max(0, Math.floor((gap - 16) / 2));
       const buffer = Math.min(REACTION_BUFFER, maxBuffer);
-      let zoneLeft = Math.ceil((leftEdge + buffer) / 16) * 16;
-      const zoneRight = Math.floor((rightEdge - buffer) / 16) * 16;
+      const corridorLeft = Math.ceil((leftEdge + buffer) / 16) * 16;
+      const corridorRight = Math.floor((rightEdge - buffer) / 16) * 16;
+      let zoneLeft = corridorLeft;
+      let zoneRight = corridorRight;
       if (zoneRight - zoneLeft < MIN_ZONE_WIDTH) continue;
       if (gaps.length) {
         let nearestGapRight = null;
@@ -1930,6 +2146,19 @@ export default class LevelScene extends Phaser.Scene {
           if (zoneRight - zoneLeft < MIN_ZONE_WIDTH) continue;
         }
       }
+      zoneLeft = Math.round((zoneLeft + SPIKE_ZONE_X_OFFSET) / 16) * 16;
+      zoneRight = Math.round((zoneRight + SPIKE_ZONE_X_OFFSET) / 16) * 16;
+      if (zoneLeft < corridorLeft) zoneLeft = corridorLeft;
+      if (zoneRight > corridorRight) zoneRight = corridorRight;
+      let zoneWidth = zoneRight - zoneLeft;
+      zoneWidth =
+        Math.round((zoneWidth * SPIKE_ZONE_WIDTH_SCALE) / 16) * 16;
+      if (zoneWidth < MIN_ZONE_WIDTH) continue;
+      if (zoneLeft + zoneWidth > corridorRight) {
+        zoneWidth = corridorRight - zoneLeft;
+      }
+      zoneRight = zoneLeft + zoneWidth;
+      if (zoneRight - zoneLeft < MIN_ZONE_WIDTH) continue;
       if (
         zones.length &&
         zoneLeft - zones[zones.length - 1].right < MAX_GAP / 2
