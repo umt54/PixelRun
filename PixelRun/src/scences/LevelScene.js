@@ -4435,12 +4435,48 @@ export default class LevelScene extends Phaser.Scene {
       });
       return best;
     };
-    const baseGroundSegments = stageGround.map((segment) => ({
-      x: segment.x,
-      y: segment.y,
-      width: segment.width || 0,
-      height: segment.height || 0,
-    }));
+    const builtInGaps = [];
+    const baseGroundSegments = [];
+    const groundGroups = new Map();
+    stageGround.forEach((segment) => {
+      const y = Math.round(segment.y || 0);
+      const height = Math.round(segment.height || 0);
+      const key = `${y}:${height}`;
+      if (!groundGroups.has(key)) groundGroups.set(key, []);
+      groundGroups.get(key).push(segment);
+    });
+    groundGroups.forEach((segments) => {
+      const sorted = segments.slice().sort((a, b) => a.x - b.x);
+      let groupLeft = Number.POSITIVE_INFINITY;
+      let groupRight = Number.NEGATIVE_INFINITY;
+      sorted.forEach((segment) => {
+        groupLeft = Math.min(groupLeft, segment.x);
+        groupRight = Math.max(
+          groupRight,
+          segment.x + (segment.width || 0)
+        );
+      });
+      const first = sorted[0];
+      if (
+        Number.isFinite(groupLeft) &&
+        Number.isFinite(groupRight) &&
+        groupRight > groupLeft
+      ) {
+        baseGroundSegments.push({
+          type: "ground",
+          x: Math.round(groupLeft),
+          y: first.y,
+          width: Math.round(groupRight - groupLeft),
+          height: first.height || 0,
+        });
+      }
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const gapLeft = Math.round(sorted[i].x + (sorted[i].width || 0));
+        const gapRight = Math.round(sorted[i + 1].x);
+        if (gapRight - gapLeft < GAP_MIN_WIDTH) continue;
+        builtInGaps.push({ left: gapLeft, right: gapRight });
+      }
+    });
 
     if (platformCandidates.length) {
       const sortedPlatforms = platformCandidates
@@ -4474,12 +4510,19 @@ export default class LevelScene extends Phaser.Scene {
       });
     }
 
-    let groundGaps = this.buildGroundGapRanges(
+    const proceduralGaps = this.buildGroundGapRanges(
       stageGround,
       spawn,
       goal,
       platforms
     );
+    let groundGaps = builtInGaps.slice();
+    proceduralGaps.forEach((gap) => {
+      const overlapsBuiltIn = builtInGaps.some(
+        (entry) => gap.right > entry.left && gap.left < entry.right
+      );
+      if (!overlapsBuiltIn) groundGaps.push(gap);
+    });
     const goalSafeLeft = goal
       ? Math.round((goal.x || 0) - GOAL_SAFE_BUFFER)
       : null;
@@ -4565,6 +4608,7 @@ export default class LevelScene extends Phaser.Scene {
 
     const nextObjects = [];
     let nextId = maxId + 1;
+    let baseGroundInjected = false;
 
     objects.forEach((obj) => {
       if (obj.type === "hazard") return;
@@ -4572,6 +4616,25 @@ export default class LevelScene extends Phaser.Scene {
         if (keptPlatforms.size && !keptPlatforms.has(obj)) return;
       }
       if (obj.type === "ground" && !this.isFloatingPlatform(obj)) {
+        if (baseGroundSegments.length) {
+          if (baseGroundInjected) return;
+          baseGroundInjected = true;
+          baseGroundSegments.forEach((segment) => {
+            const split = this.splitGroundWithGaps(segment, groundGaps, nextId);
+            nextId = split.nextId;
+            split.segments.forEach((seg) => {
+              nextObjects.push(seg);
+              this.groundSegments.push({
+                left: seg.x,
+                right: seg.x + (seg.width || 0),
+                width: seg.width || 0,
+                height: seg.height || 0,
+                top: seg.y - (seg.height || 0),
+              });
+            });
+          });
+          return;
+        }
         const split = this.splitGroundWithGaps(obj, groundGaps, nextId);
         nextId = split.nextId;
         split.segments.forEach((segment) => {
