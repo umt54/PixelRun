@@ -1466,6 +1466,10 @@ export default class LevelScene extends Phaser.Scene {
       : 220;
     const jumpHeightLimit = Math.max(48, playerJumpReach - 8);
     const jumpDistanceLimit = Math.max(96, maxJumpDistanceRaw - 24);
+    const hazardRunup = 64;
+    const hazardClearance = 32;
+    const hazardCoinOffset = 60;
+    const groundCoinOffset = 36;
     const safeGroundSegments = this.safeGroundSegments || [];
     const platformSurfaces = this.platformSurfaces || [];
     const safeSurfaces = safeGroundSegments.concat(
@@ -1473,8 +1477,13 @@ export default class LevelScene extends Phaser.Scene {
         left: surface.left,
         right: surface.right,
         top: surface.top,
+        width: surface.width,
       }))
     );
+
+    const surfaceWidth = (surface) =>
+      surface.width ?? Math.max(0, surface.right - surface.left);
+    const hasRunup = (surface) => surfaceWidth(surface) >= hazardRunup;
 
     const isSurfaceReachable = (surface, coinX, coinY) => {
       const left = surface.left;
@@ -1526,6 +1535,7 @@ export default class LevelScene extends Phaser.Scene {
         const leftSurface = findNearestSurfaceLeft(coinX);
         const rightSurface = findNearestSurfaceRight(coinX);
         if (!leftSurface || !rightSurface) return false;
+        if (!hasRunup(leftSurface) || !hasRunup(rightSurface)) return false;
         if (!isSurfaceReachable(leftSurface, coinX, coinY)) return false;
         if (!isSurfaceReachable(rightSurface, coinX, coinY)) return false;
         return true;
@@ -1559,7 +1569,8 @@ export default class LevelScene extends Phaser.Scene {
       baseTop,
       offsetY,
       requireBothSides,
-      requireSurfaceAtX
+      requireSurfaceAtX,
+      hazardBounds
     ) => {
       let tries = 0;
       for (const coinX of candidateXs) {
@@ -1567,8 +1578,26 @@ export default class LevelScene extends Phaser.Scene {
         if (tries >= maxCoinTries) break;
         tries += 1;
         const coinY = baseTop - baseCoinHeight * 0.5 - offsetY;
+        const coinTop = coinY - baseCoinHeight * 0.5;
+        const coinBottom = coinY + baseCoinHeight * 0.5;
+        const overlapsPlatform = platformSurfaces.some((surface) => {
+          if (coinX < surface.left || coinX > surface.right) return false;
+          const surfaceTop = surface.top;
+          const surfaceBottom = surface.top + (surface.height || 0);
+          return coinBottom > surfaceTop && coinTop < surfaceBottom;
+        });
+        if (overlapsPlatform) continue;
         if (!canReachCoin(coinX, coinY, requireBothSides, requireSurfaceAtX))
           continue;
+        if (hazardBounds) {
+          const leftSurface = findNearestSurfaceLeft(coinX);
+          const rightSurface = findNearestSurfaceRight(coinX);
+          if (!leftSurface || !rightSurface) continue;
+          if (leftSurface.right > hazardBounds.left - hazardBounds.clearance)
+            continue;
+          if (rightSurface.left < hazardBounds.right + hazardBounds.clearance)
+            continue;
+        }
         if (placeExtraCoin(coinX, baseTop, offsetY)) return true;
       }
       return false;
@@ -1583,7 +1612,13 @@ export default class LevelScene extends Phaser.Scene {
       const candidates = [center, center - 16, center + 16].filter(
         (x) => x >= zone.left + 8 && x <= zone.right - 8
       );
-      if (tryPlaceCoin(candidates, stageTop, 50, true, false))
+      if (
+        tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
+          left: zone.left,
+          right: zone.right,
+          clearance: hazardClearance,
+        })
+      )
         spikeCoinPlaced = true;
     });
 
@@ -1596,7 +1631,7 @@ export default class LevelScene extends Phaser.Scene {
       const candidates = [center, center - 16, center + 16].filter(
         (x) => x >= gap.left + 8 && x <= gap.right - 8
       );
-      if (tryPlaceCoin(candidates, stageTop, 50, true, false))
+      if (tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false))
         gapCoinPlaced = true;
     });
 
@@ -1612,7 +1647,7 @@ export default class LevelScene extends Phaser.Scene {
         segment.left + width * 0.65,
       ].filter((x) => !isInSpikeZone(x));
       if (!candidates.length) return;
-      if (tryPlaceCoin(candidates, stageTop, 30, false, true))
+      if (tryPlaceCoin(candidates, stageTop, groundCoinOffset, false, true))
         groundCoinPlaced = true;
     });
     const activeCoins = this.getRemainingActiveCoins();
@@ -1646,7 +1681,7 @@ export default class LevelScene extends Phaser.Scene {
       }
     });
 
-    const groundGaps = this.buildGroundGapRanges(stageGround, spawn, goal);
+    const groundGaps = this.buildGroundGapRanges(stageGround, spawn, goal, platforms);
     const spikeZones = this.buildSpikeZones(platforms);
     this.groundGapRanges = groundGaps;
     this.spikeZones = spikeZones;
@@ -1710,15 +1745,20 @@ export default class LevelScene extends Phaser.Scene {
     return nextObjects;
   }
 
-  buildGroundGapRanges(segments, spawn, goal) {
+  buildGroundGapRanges(segments, spawn, goal, platforms) {
     const gaps = [];
     if (!segments?.length) return gaps;
     const TILE = 16;
     const MIN_SEGMENT = 640;
     const EDGE_BUFFER = 96;
     const SAFE_BUFFER = 160;
+    const PLATFORM_BUFFER = 0;
     const spawnX = spawn?.x ?? -99999;
     const goalX = goal?.x ?? 99999;
+    const platformRanges = (platforms || []).map((platform) => ({
+      left: platform.x,
+      right: platform.x + (platform.width || 0),
+    }));
     const sorted = segments.slice().sort((a, b) => a.x - b.x);
 
     sorted.forEach((segment, index) => {
@@ -1739,6 +1779,14 @@ export default class LevelScene extends Phaser.Scene {
         const gapCenter = gapLeft + gapWidth / 2;
         if (Math.abs(gapCenter - spawnX) < SAFE_BUFFER) continue;
         if (Math.abs(gapCenter - goalX) < SAFE_BUFFER) continue;
+        if (PLATFORM_BUFFER > 0) {
+          const gapLeftBuffered = gapLeft - PLATFORM_BUFFER;
+          const gapRightBuffered = gapRight + PLATFORM_BUFFER;
+          const nearPlatform = platformRanges.some(
+            (range) => gapRightBuffered > range.left && gapLeftBuffered < range.right
+          );
+          if (nearPlatform) continue;
+        }
         gaps.push({ left: gapLeft, right: gapRight });
       }
     });
@@ -1751,15 +1799,24 @@ export default class LevelScene extends Phaser.Scene {
     if (!platforms?.length) return zones;
     const MIN_GAP = 16;
     const MAX_GAP = 240;
+    const REACTION_BUFFER = 32;
+    const MIN_ZONE_WIDTH = 32;
     const sorted = platforms.slice().sort((a, b) => a.x - b.x);
     for (let i = 0; i < sorted.length - 1; i++) {
       const leftEdge = sorted[i].x + (sorted[i].width || 0);
       const rightEdge = sorted[i + 1].x;
       const gap = rightEdge - leftEdge;
       if (gap < MIN_GAP || gap > MAX_GAP) continue;
-      const zoneLeft = Math.ceil(leftEdge / 16) * 16;
-      const zoneRight = Math.floor(rightEdge / 16) * 16;
-      if (zoneRight - zoneLeft < 16) continue;
+      const maxBuffer = Math.max(0, Math.floor((gap - 16) / 2));
+      const buffer = Math.min(REACTION_BUFFER, maxBuffer);
+      const zoneLeft = Math.ceil((leftEdge + buffer) / 16) * 16;
+      const zoneRight = Math.floor((rightEdge - buffer) / 16) * 16;
+      if (zoneRight - zoneLeft < MIN_ZONE_WIDTH) continue;
+      if (
+        zones.length &&
+        zoneLeft - zones[zones.length - 1].right < MAX_GAP / 2
+      )
+        continue;
       zones.push({ left: zoneLeft, right: zoneRight });
     }
     return zones;
