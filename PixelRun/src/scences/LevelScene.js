@@ -24,6 +24,7 @@ const PRINT_LAYOUT_IDS = false;
 const EDITOR_ACCESS_TOKEN = "secret1";
 const EDITOR_GRID_SIZE = 16;
 const EDITOR_HISTORY_LIMIT = 50;
+const LEVEL_OVERRIDES = {};
 
 
 export default class LevelScene extends Phaser.Scene {
