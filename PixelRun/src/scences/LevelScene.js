@@ -1473,14 +1473,23 @@ export default class LevelScene extends Phaser.Scene {
     const groundCoinOffset = 36;
     const safeGroundSegments = this.safeGroundSegments || [];
     const platformSurfaces = this.platformSurfaces || [];
-    const safeSurfaces = safeGroundSegments.concat(
-      platformSurfaces.map((surface) => ({
-        left: surface.left,
-        right: surface.right,
-        top: surface.top,
-        width: surface.width,
+    const safeSurfaces = safeGroundSegments
+      .map((segment) => ({
+        left: segment.left,
+        right: segment.right,
+        top: segment.top,
+        width: segment.width,
+        isPlatform: false,
       }))
-    );
+      .concat(
+        platformSurfaces.map((surface) => ({
+          left: surface.left,
+          right: surface.right,
+          top: surface.top,
+          width: surface.width,
+          isPlatform: true,
+        }))
+      );
 
     const surfaceWidth = (surface) =>
       surface.width ?? Math.max(0, surface.right - surface.left);
@@ -1588,6 +1597,14 @@ export default class LevelScene extends Phaser.Scene {
           return coinBottom > surfaceTop && coinTop < surfaceBottom;
         });
         if (overlapsPlatform) continue;
+        const platformAbove = platformSurfaces.find(
+          (surface) =>
+            coinX >= surface.left && coinX <= surface.right && coinY > surface.top
+        );
+        if (platformAbove) {
+          const leftSurface = findNearestSurfaceLeft(coinX);
+          if (!leftSurface || leftSurface.isPlatform) continue;
+        }
         if (!canReachCoin(coinX, coinY, requireBothSides, requireSurfaceAtX))
           continue;
         if (hazardBounds) {
@@ -1690,6 +1707,25 @@ export default class LevelScene extends Phaser.Scene {
       }
     });
 
+    const jumpSpeed = Math.abs(PHYSICS.PLAYER.JUMP_SPEED || 0);
+    const gravityY = Math.max(1, PHYSICS.GRAVITY_Y || 1);
+    const playerJumpReach = jumpSpeed
+      ? Math.round((jumpSpeed * jumpSpeed) / (2 * gravityY))
+      : 80;
+    const maxPlatformRise = Math.max(48, playerJumpReach - 8);
+    const stageTopAtX = (x) => {
+      let best = null;
+      stageGround.forEach((ground) => {
+        const left = ground.x;
+        const right = ground.x + (ground.width || 0);
+        if (x >= left && x <= right) {
+          const top = ground.y - (ground.height || 0);
+          if (best == null || top > best) best = top;
+        }
+      });
+      return best;
+    };
+
     if (platformCandidates.length) {
       const sortedPlatforms = platformCandidates
         .slice()
@@ -1699,6 +1735,14 @@ export default class LevelScene extends Phaser.Scene {
         (this.platformDisplaySize?.width || 140) * 1.4
       );
       sortedPlatforms.forEach((platform) => {
+        const platformTop = platform.y - (platform.height || 0);
+        const centerX = platform.x + (platform.width || 0) * 0.5;
+        let safeTop = stageTopAtX(centerX);
+        if (lastKept) {
+          const lastTop = lastKept.y - (lastKept.height || 0);
+          if (safeTop == null || lastTop < safeTop) safeTop = lastTop;
+        }
+        if (safeTop != null && safeTop - platformTop > maxPlatformRise) return;
         if (!lastKept) {
           platforms.push(platform);
           keptPlatforms.add(platform);
@@ -1857,7 +1901,7 @@ export default class LevelScene extends Phaser.Scene {
     const MIN_GAP = 16;
     const MAX_GAP = 240;
     const REACTION_BUFFER = REACTION_DISTANCE;
-    const MIN_ZONE_WIDTH = 32;
+    const MIN_ZONE_WIDTH = 48;
     const gaps = (gapRanges || []).slice().sort((a, b) => a.left - b.left);
     const sorted = platforms.slice().sort((a, b) => a.x - b.x);
     for (let i = 0; i < sorted.length - 1; i++) {
