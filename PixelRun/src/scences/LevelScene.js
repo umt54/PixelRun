@@ -7,6 +7,7 @@ import { loadProgress, saveProgress } from "../state/saveSystem.js";
 const PLATFORM_Y_OFFSET = 40;
 const SPLIT_DISTANCE_ON = 520;
 const SPLIT_DISTANCE_OFF = 420;
+const REACTION_DISTANCE = 64;
 
 
 export default class LevelScene extends Phaser.Scene {
@@ -1631,7 +1632,13 @@ export default class LevelScene extends Phaser.Scene {
       const candidates = [center, center - 16, center + 16].filter(
         (x) => x >= gap.left + 8 && x <= gap.right - 8
       );
-      if (tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false))
+      if (
+        tryPlaceCoin(candidates, stageTop, hazardCoinOffset, true, false, {
+          left: gap.left,
+          right: gap.right,
+          clearance: hazardClearance,
+        })
+      )
         gapCoinPlaced = true;
     });
 
@@ -1668,6 +1675,8 @@ export default class LevelScene extends Phaser.Scene {
     let goal = null;
     const stageGround = [];
     const platforms = [];
+    const platformCandidates = [];
+    const keptPlatforms = new Set();
 
     objects.forEach((obj) => {
       if (Number.isFinite(obj?.id)) maxId = Math.max(maxId, obj.id);
@@ -1675,14 +1684,38 @@ export default class LevelScene extends Phaser.Scene {
       if (obj.type === "goal") goal = obj;
       if (obj.type !== "ground") return;
       if (this.isFloatingPlatform(obj)) {
-        platforms.push(obj);
+        platformCandidates.push(obj);
       } else {
         stageGround.push(obj);
       }
     });
 
+    if (platformCandidates.length) {
+      const sortedPlatforms = platformCandidates
+        .slice()
+        .sort((a, b) => a.x - b.x);
+      let lastKept = null;
+      const minPlatformGap = Math.round(
+        (this.platformDisplaySize?.width || 140) * 1.4
+      );
+      sortedPlatforms.forEach((platform) => {
+        if (!lastKept) {
+          platforms.push(platform);
+          keptPlatforms.add(platform);
+          lastKept = platform;
+          return;
+        }
+        const lastRight = lastKept.x + (lastKept.width || 0);
+        const gap = platform.x - lastRight;
+        if (gap < minPlatformGap) return;
+        platforms.push(platform);
+        keptPlatforms.add(platform);
+        lastKept = platform;
+      });
+    }
+
     const groundGaps = this.buildGroundGapRanges(stageGround, spawn, goal, platforms);
-    const spikeZones = this.buildSpikeZones(platforms);
+    const spikeZones = this.buildSpikeZones(platforms, groundGaps);
     this.groundGapRanges = groundGaps;
     this.spikeZones = spikeZones;
     this.groundSegments = [];
@@ -1692,6 +1725,9 @@ export default class LevelScene extends Phaser.Scene {
 
     objects.forEach((obj) => {
       if (obj.type === "hazard") return;
+      if (obj.type === "ground" && this.isFloatingPlatform(obj)) {
+        if (keptPlatforms.size && !keptPlatforms.has(obj)) return;
+      }
       if (obj.type === "ground" && !this.isFloatingPlatform(obj)) {
         const split = this.splitGroundWithGaps(obj, groundGaps, nextId);
         nextId = split.nextId;
@@ -1753,6 +1789,7 @@ export default class LevelScene extends Phaser.Scene {
     const EDGE_BUFFER = 96;
     const SAFE_BUFFER = 160;
     const PLATFORM_BUFFER = 0;
+    const reactionDistance = REACTION_DISTANCE;
     const spawnX = spawn?.x ?? -99999;
     const goalX = goal?.x ?? 99999;
     const platformRanges = (platforms || []).map((platform) => ({
@@ -1760,6 +1797,14 @@ export default class LevelScene extends Phaser.Scene {
       right: platform.x + (platform.width || 0),
     }));
     const sorted = segments.slice().sort((a, b) => a.x - b.x);
+    const nearestPlatformRight = (x) => {
+      let best = null;
+      platformRanges.forEach((range) => {
+        if (range.right > x) return;
+        if (best == null || range.right > best) best = range.right;
+      });
+      return best;
+    };
 
     sorted.forEach((segment, index) => {
       const left = segment.x;
@@ -1776,7 +1821,19 @@ export default class LevelScene extends Phaser.Scene {
         let gapRight = gapLeft + gapWidth;
         if (gapLeft < left + EDGE_BUFFER) continue;
         if (gapRight > right - EDGE_BUFFER) continue;
-        const gapCenter = gapLeft + gapWidth / 2;
+        let gapCenter = gapLeft + gapWidth / 2;
+        const priorPlatformRight = nearestPlatformRight(gapLeft);
+        if (
+          priorPlatformRight != null &&
+          gapLeft - priorPlatformRight < reactionDistance
+        ) {
+          gapLeft =
+            Math.round((priorPlatformRight + reactionDistance) / TILE) * TILE;
+          gapRight = gapLeft + gapWidth;
+          if (gapLeft < left + EDGE_BUFFER) continue;
+          if (gapRight > right - EDGE_BUFFER) continue;
+          gapCenter = gapLeft + gapWidth / 2;
+        }
         if (Math.abs(gapCenter - spawnX) < SAFE_BUFFER) continue;
         if (Math.abs(gapCenter - goalX) < SAFE_BUFFER) continue;
         if (PLATFORM_BUFFER > 0) {
@@ -1794,13 +1851,14 @@ export default class LevelScene extends Phaser.Scene {
     return gaps;
   }
 
-  buildSpikeZones(platforms) {
+  buildSpikeZones(platforms, gapRanges) {
     const zones = [];
     if (!platforms?.length) return zones;
     const MIN_GAP = 16;
     const MAX_GAP = 240;
-    const REACTION_BUFFER = 32;
+    const REACTION_BUFFER = REACTION_DISTANCE;
     const MIN_ZONE_WIDTH = 32;
+    const gaps = (gapRanges || []).slice().sort((a, b) => a.left - b.left);
     const sorted = platforms.slice().sort((a, b) => a.x - b.x);
     for (let i = 0; i < sorted.length - 1; i++) {
       const leftEdge = sorted[i].x + (sorted[i].width || 0);
@@ -1809,9 +1867,25 @@ export default class LevelScene extends Phaser.Scene {
       if (gap < MIN_GAP || gap > MAX_GAP) continue;
       const maxBuffer = Math.max(0, Math.floor((gap - 16) / 2));
       const buffer = Math.min(REACTION_BUFFER, maxBuffer);
-      const zoneLeft = Math.ceil((leftEdge + buffer) / 16) * 16;
+      let zoneLeft = Math.ceil((leftEdge + buffer) / 16) * 16;
       const zoneRight = Math.floor((rightEdge - buffer) / 16) * 16;
       if (zoneRight - zoneLeft < MIN_ZONE_WIDTH) continue;
+      if (gaps.length) {
+        let nearestGapRight = null;
+        gaps.forEach((gapRange) => {
+          if (gapRange.right > zoneLeft) return;
+          if (nearestGapRight == null || gapRange.right > nearestGapRight)
+            nearestGapRight = gapRange.right;
+        });
+        if (
+          nearestGapRight != null &&
+          zoneLeft - nearestGapRight < REACTION_DISTANCE
+        ) {
+          zoneLeft =
+            Math.ceil((nearestGapRight + REACTION_DISTANCE) / 16) * 16;
+          if (zoneRight - zoneLeft < MIN_ZONE_WIDTH) continue;
+        }
+      }
       if (
         zones.length &&
         zoneLeft - zones[zones.length - 1].right < MAX_GAP / 2
