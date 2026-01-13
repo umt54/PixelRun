@@ -77,32 +77,21 @@ export default class MainMenuScene extends Phaser.Scene {
     this.clearMenu();
     this.mode = 'modeSelect';
     const title = this.add
-      .text(400, 210, 'Modus waehlen', {
+      .text(400, 210, 'Modus wählen', {
         fontFamily: this.ui.fontFamily,
         fontSize: 32,
         color: this.ui.colors.title,
         stroke: this.ui.colors.shadow,
         strokeThickness: 5
       })
-      .setOrigin(0.5)
-      .setShadow(0, 2, this.ui.colors.shadow, 5, false, true);
-    const hint = this.add
-      .text(400, 245, 'Singleplayer oder 2-Spieler-Koop?', {
-        fontFamily: this.ui.fontFamily,
-        fontSize: 16,
-        color: this.ui.colors.body,
-        stroke: this.ui.colors.shadow,
-        strokeThickness: 3
-      })
       .setOrigin(0.5);
-    hint.setShadow(0, 2, this.ui.colors.shadow, 4, false, true);
-    this.menuTexts.push(title, hint);
-
+    title.setShadow(0, 3, this.ui.colors.shadow, 6, false, true);
+    this.menuTexts.push(title);
     const items = [
       { label: 'Singleplayer', action: () => this.setPlayerMode(1) },
       { label: '2 Spieler (Koop)', action: () => this.setPlayerMode(2) }
     ];
-    this.createButtons(items, 280);
+    this.createButtons(items, 250);
   }
 
   setPlayerMode(count) {
@@ -127,7 +116,7 @@ export default class MainMenuScene extends Phaser.Scene {
     modeLabel.setShadow(0, 2, this.ui.colors.shadow, 4, false, true);
     this.menuTexts.push(modeLabel);
     const items = [
-      { label: 'Modus aendern', action: () => this.renderPlayerModePrompt() },
+      { label: 'Modus ändern', action: () => this.renderPlayerModePrompt() },
       { label: 'Start (Level 1)', action: () => this.startLevel(DEFAULTS.START_LEVEL) },
       { label: 'Levelauswahl', action: () => { this.mode = 'levelselect'; this.renderLevelSelect(); } },
       { label: 'Einstellungen', action: () => { this.mode = 'settings'; this.renderSettings(); } }
